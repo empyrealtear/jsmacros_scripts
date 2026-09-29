@@ -9,5 +9,6 @@
 - RS精致存储操作终端库存: [RSUtils.js](./RSUtils.js)
 - Baritone路径规划渲染: [BaritoneRender.js](./BaritoneRender.js)
 - 潮汐自动钓鱼: [TideFishMinigame.ts](./TideFishMinigame.ts)
+- 机动柴油动力油田扫描: [CreateOilScanner.js](./CreateOilScanner.js)、[油田扫描缓存可视化](https://htmlpreview.github.io/?https://raw.githubusercontent.com/empyrealtear/jsmacros_scripts/refs/heads/main/cdg_oil_cache_preview.html)
 - 星露谷插件自动钓鱼: [CustomFishing.ts](./CustomFishing.ts)、[ResourceParse_CustomFishing.ts](./ResourceParse_CustomFishing.ts)
 - 反混淆映射表反射法: [DeobfReflect.ts](./DeobfReflect.ts)

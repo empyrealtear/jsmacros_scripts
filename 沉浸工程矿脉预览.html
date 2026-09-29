@@ -5,153 +5,334 @@
     <meta charset="UTF-8">
     <title>IE 矿脉可视化</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-            background: #1a1d21; color: #d4d8dd; padding: 12px;
+            background: #1a1d21;
+            color: #d4d8dd;
+            padding: 12px;
         }
-        h1 { font-size: 16px; margin-bottom: 8px; color: #8ab4f8; }
+
+        h1 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #8ab4f8;
+        }
 
         .toolbar {
-            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-            margin-bottom: 8px; padding: 6px 8px;
-            background: #25292e; border-radius: 6px; font-size: 12px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 6px 8px;
+            background: #25292e;
+            border-radius: 6px;
+            font-size: 12px;
         }
-        .toolbar label { color: #9aa0a6; }
-        .toolbar input[type="file"] { color: #d4d8dd; font-size: 12px; }
-        .toolbar input[type="text"], .toolbar input[type="number"] {
+
+        .toolbar label {
+            color: #9aa0a6;
+        }
+
+        .toolbar input[type="file"] {
+            color: #d4d8dd;
+            font-size: 12px;
+        }
+
+        .toolbar input[type="text"],
+        .toolbar input[type="number"] {
             padding: 3px 6px;
-            background: #1a1d21; color: #d4d8dd;
-            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
+            background: #1a1d21;
+            color: #d4d8dd;
+            border: 1px solid #3c4043;
+            border-radius: 4px;
+            font-size: 12px;
         }
-        .toolbar input[type="text"] { width: 130px; }
-        .toolbar input[type="number"] { width: 90px; }
+
+        .toolbar input[type="text"] {
+            width: 130px;
+        }
+
+        .toolbar input[type="number"] {
+            width: 90px;
+        }
+
         .toolbar select {
             padding: 3px 6px;
-            background: #1a1d21; color: #d4d8dd;
-            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
+            background: #1a1d21;
+            color: #d4d8dd;
+            border: 1px solid #3c4043;
+            border-radius: 4px;
+            font-size: 12px;
             max-width: 220px;
         }
+
         .toolbar button {
-            padding: 4px 10px; background: #3d6b4d; color: #e8eaed;
-            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+            padding: 4px 10px;
+            background: #3d6b4d;
+            color: #e8eaed;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
             transition: background 0.15s;
         }
-        .toolbar button:hover { background: #4d7c5d; }
-        .status { color: #9aa0a6; margin-left: auto; font-size: 11px; }
+
+        .toolbar button:hover {
+            background: #4d7c5d;
+        }
+
+        .status {
+            color: #9aa0a6;
+            margin-left: auto;
+            font-size: 11px;
+        }
 
         .stats {
-            display: flex; gap: 12px; flex-wrap: wrap;
-            margin-bottom: 8px; font-size: 12px; color: #9aa0a6;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #9aa0a6;
         }
-        .stats b { color: #8ab4f8; }
+
+        .stats b {
+            color: #8ab4f8;
+        }
 
         #main {
-            display: flex; gap: 8px; height: 700px;
+            display: flex;
+            gap: 8px;
+            height: 700px;
         }
 
         #legends {
-            width: 200px; flex-shrink: 0;
-            display: flex; flex-direction: column; gap: 8px;
+            width: 200px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
             overflow-y: auto;
         }
+
         .legend-box {
             background: #25292e;
-            border: 1px solid #3c4043; border-radius: 6px;
+            border: 1px solid #3c4043;
+            border-radius: 6px;
             padding: 8px;
         }
+
         .legend-box h3 {
-            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
-            display: flex; justify-content: space-between; align-items: center;
+            font-size: 12px;
+            color: #8ab4f8;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
+
         .legend-box h3 button {
-            font-size: 10px; padding: 1px 5px;
-            background: #30343a; color: #9aa0a6;
-            border: 1px solid #3c4043; border-radius: 3px; cursor: pointer;
+            font-size: 10px;
+            padding: 1px 5px;
+            background: #30343a;
+            color: #9aa0a6;
+            border: 1px solid #3c4043;
+            border-radius: 3px;
+            cursor: pointer;
         }
-        .legend-box h3 button:hover { background: #3c4043; }
+
+        .legend-box h3 button:hover {
+            background: #3c4043;
+        }
+
         .legend-item {
-            display: flex; align-items: center; gap: 6px;
-            padding: 4px 6px; margin-bottom: 1px;
-            border-radius: 3px; cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            margin-bottom: 1px;
+            border-radius: 3px;
+            cursor: pointer;
             font-size: 12px;
             border-left: 3px solid transparent;
             user-select: none;
             transition: background 0.1s;
         }
-        .legend-item:hover { background: #2f3439; }
+
+        .legend-item:hover {
+            background: #2f3439;
+        }
+
         .legend-item.active {
             background: #3d4a5c;
             border-left-color: #8ab4f8;
         }
+
         .legend-color {
-            width: 12px; height: 12px; border-radius: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
             flex-shrink: 0;
         }
+
         .legend-item .count {
-            margin-left: auto; color: #80868b; font-size: 11px;
+            margin-left: auto;
+            color: #80868b;
+            font-size: 11px;
         }
 
         #canvasWrap {
-            position: relative; flex: 1;
+            position: relative;
+            flex: 1;
             background: #202327;
-            border: 1px solid #3c4043; border-radius: 6px;
-            overflow: hidden; cursor: grab;
+            border: 1px solid #3c4043;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: grab;
         }
-        #canvasWrap.dragging { cursor: grabbing; }
-        canvas { display: block; position: absolute; top: 0; left: 0; }
+
+        #canvasWrap.dragging {
+            cursor: grabbing;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
 
         .hud {
-            position: absolute; top: 8px;
+            position: absolute;
+            top: 8px;
             background: rgba(26, 29, 33, 0.9);
-            border: 1px solid #3c4043; border-radius: 4px;
-            padding: 3px 8px; font-size: 11px; color: #9aa0a6;
+            border: 1px solid #3c4043;
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 11px;
+            color: #9aa0a6;
             pointer-events: none;
         }
-        .hud b { color: #8ab4f8; }
-        #coordInfo { left: 8px; }
-        #zoomInfo { right: 8px; }
+
+        .hud b {
+            color: #8ab4f8;
+        }
+
+        #coordInfo {
+            left: 8px;
+        }
+
+        #zoomInfo {
+            right: 8px;
+        }
 
         #tooltip {
-            position: fixed; pointer-events: none;
+            position: fixed;
+            pointer-events: none;
             background: rgba(26, 29, 33, 0.98);
-            border: 1px solid #5c7a99; border-radius: 5px;
-            padding: 6px 10px; font-size: 11px; color: #d4d8dd;
-            white-space: nowrap; display: none; z-index: 9999;
+            border: 1px solid #5c7a99;
+            border-radius: 5px;
+            padding: 6px 10px;
+            font-size: 11px;
+            color: #d4d8dd;
+            white-space: nowrap;
+            display: none;
+            z-index: 9999;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
             line-height: 1.5;
         }
 
         #listPanel {
-            width: 250px; flex-shrink: 0;
+            width: 250px;
+            flex-shrink: 0;
             background: #25292e;
-            border: 1px solid #3c4043; border-radius: 6px;
-            padding: 8px; overflow-y: auto;
+            border: 1px solid #3c4043;
+            border-radius: 6px;
+            padding: 8px;
+            overflow-y: auto;
             font-size: 12px;
         }
+
         #listPanel h3 {
-            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
-            display: flex; justify-content: space-between; align-items: center;
-            position: sticky; top: 0; background: #25292e;
-            padding: 2px 0; z-index: 1;
+            font-size: 12px;
+            color: #8ab4f8;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: #25292e;
+            padding: 2px 0;
+            z-index: 1;
         }
+
         .vein-item {
-            padding: 4px 6px; margin-bottom: 3px;
-            border-radius: 4px; cursor: pointer;
+            padding: 4px 6px;
+            margin-bottom: 3px;
+            border-radius: 4px;
+            cursor: pointer;
             border-left: 3px solid transparent;
             transition: background 0.1s;
         }
-        .vein-item:hover { background: #2f3439; }
-        .vein-item.active { background: #3d4a5c; border-left-color: #8ab4f8; }
-        .vein-item .name { color: #d4d8dd; display: flex; justify-content: space-between; }
-        .vein-item .coord { color: #80868b; font-size: 11px; display: flex; justify-content: space-between; margin-top: 1px; }
-        .vein-item .dist { color: #8ab4f8; }
-        .vein-item .oil { color: #c9a86a; font-size: 11px; margin-top: 1px; }
 
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #5f6368; }
+        .vein-item:hover {
+            background: #2f3439;
+        }
+
+        .vein-item.active {
+            background: #3d4a5c;
+            border-left-color: #8ab4f8;
+        }
+
+        .vein-item .name {
+            color: #d4d8dd;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .vein-item .coord {
+            color: #80868b;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1px;
+        }
+
+        .vein-item .dist {
+            color: #8ab4f8;
+        }
+
+        .vein-item .oil {
+            color: #c9a86a;
+            font-size: 11px;
+            margin-top: 1px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3c4043;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5f6368;
+        }
     </style>
 </head>
 
@@ -209,12 +390,12 @@
     <script>
         // ==================== 常量 ====================
         const RESERVE_LEVELS = [
-            { id: 'full',     label: '满 (100%)',     color: '#238636', min: 0.95, max: 1.01 },
-            { id: 'high',     label: '高 (75-95%)',   color: '#3fb950', min: 0.75, max: 0.95 },
-            { id: 'mid',      label: '中 (50-75%)',   color: '#d29922', min: 0.50, max: 0.75 },
-            { id: 'low',      label: '低 (25-50%)',   color: '#f0883e', min: 0.25, max: 0.50 },
-            { id: 'critical', label: '极低 (1-25%)',  color: '#f85149', min: 0.01, max: 0.25 },
-            { id: 'empty',    label: '已枯竭 (0%)',   color: '#6e7681', min: -1,   max: 0.01 },
+            { id: 'full', label: '满 (100%)', color: '#238636', min: 0.95, max: 1.01 },
+            { id: 'high', label: '高 (75-95%)', color: '#3fb950', min: 0.75, max: 0.95 },
+            { id: 'mid', label: '中 (50-75%)', color: '#d29922', min: 0.50, max: 0.75 },
+            { id: 'low', label: '低 (25-50%)', color: '#f0883e', min: 0.25, max: 0.50 },
+            { id: 'critical', label: '极低 (1-25%)', color: '#f85149', min: 0.01, max: 0.25 },
+            { id: 'empty', label: '已枯竭 (0%)', color: '#6e7681', min: -1, max: 0.01 },
         ];
 
         const MINERAL_COLORS = [
@@ -667,7 +848,8 @@
             state.currentDim = newDim;
             state.selectedVein = null;
 
-            // 重新过滤当前维度
+            recalcStats();
+            buildLegends();
             applyFilter();
             resetView();
             updateStats();

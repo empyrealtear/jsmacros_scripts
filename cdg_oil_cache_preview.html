@@ -3,270 +3,283 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>CDG 油田缓存可视化</title>
+    <title>CDG 油田可视化</title>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-            background: #0d1117;
-            color: #c9d1d9;
-            padding: 16px;
+            background: #1a1d21; color: #d4d8dd; padding: 12px;
         }
-
-        h1 {
-            font-size: 18px;
-            margin-bottom: 10px;
-            color: #58a6ff;
-        }
+        h1 { font-size: 16px; margin-bottom: 8px; color: #8ab4f8; }
 
         .toolbar {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-bottom: 10px;
-            padding: 8px 10px;
-            background: #161b22;
-            border-radius: 6px;
-            font-size: 13px;
+            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+            margin-bottom: 8px; padding: 6px 8px;
+            background: #25292e; border-radius: 6px; font-size: 12px;
         }
-
-        .toolbar label {
-            color: #8b949e;
-        }
-
-        .toolbar input[type="number"] {
-            width: 110px;
+        .toolbar label { color: #9aa0a6; }
+        .toolbar input[type="file"] { color: #d4d8dd; font-size: 12px; }
+        .toolbar input[type="text"], .toolbar input[type="number"] {
             padding: 3px 6px;
-            background: #0d1117;
-            color: #c9d1d9;
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            font-size: 13px;
+            background: #1a1d21; color: #d4d8dd;
+            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
         }
-
-        .toolbar input[type="file"] {
-            color: #c9d1d9;
-            font-size: 13px;
-        }
-
+        .toolbar input[type="text"] { width: 130px; }
+        .toolbar input[type="number"] { width: 90px; }
         .toolbar button {
-            padding: 4px 10px;
-            background: #238636;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
+            padding: 4px 10px; background: #3d6b4d; color: #e8eaed;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+            transition: background 0.15s;
         }
-
-        .toolbar button:hover {
-            background: #2ea043;
+        .toolbar button:hover { background: #4d7c5d; }
+        .toolbar button.danger { background: #7a3b3b; }
+        .toolbar button.danger:hover { background: #8d4747; }
+        .toolbar button.highlight { background: #5c4a7d; }
+        .toolbar button.highlight:hover { background: #6e5c8e; }
+        .mode-switch {
+            display: flex; align-items: center; gap: 4px;
+            padding: 2px 6px; border: 1px solid #3c4043; border-radius: 4px;
+            background: #1a1d21; cursor: pointer; user-select: none;
         }
-
-        .toolbar button.danger {
-            background: #da3633;
+        .mode-switch input { display: none; }
+        .mode-switch .slider {
+            width: 26px; height: 14px; background: #3c4043;
+            border-radius: 7px; position: relative; transition: 0.2s;
         }
-
-        .toolbar button.danger:hover {
-            background: #f85149;
+        .mode-switch .slider::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 10px; height: 10px; background: #d4d8dd;
+            border-radius: 50%; transition: 0.2s;
         }
-
-        .toolbar button.highlight {
-            background: #a371f7;
-        }
-
-        .toolbar button.highlight:hover {
-            background: #bc8cff;
-        }
-
-        .status {
-            color: #8b949e;
-            margin-left: auto;
-        }
+        .mode-switch input:checked + .slider { background: #3d6b4d; }
+        .mode-switch input:checked + .slider::after { left: 14px; }
+        .status { color: #9aa0a6; margin-left: auto; font-size: 11px; }
 
         .stats {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 10px;
-            font-size: 13px;
-            color: #8b949e;
+            display: flex; gap: 12px; flex-wrap: wrap;
+            margin-bottom: 8px; font-size: 12px; color: #9aa0a6;
+        }
+        .stats b { color: #8ab4f8; }
+
+        #main {
+            display: flex; gap: 8px; height: 700px;
         }
 
-        .stats b {
-            color: #58a6ff;
+        #legends {
+            width: 200px; flex-shrink: 0;
+            display: flex; flex-direction: column; gap: 8px;
+            overflow-y: auto;
+        }
+        .legend-box {
+            background: #25292e;
+            border: 1px solid #3c4043; border-radius: 6px;
+            padding: 8px;
+        }
+        .legend-box h3 {
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .legend-box h3 button {
+            font-size: 10px; padding: 1px 5px;
+            background: #30343a; color: #9aa0a6;
+            border: 1px solid #3c4043; border-radius: 3px; cursor: pointer;
+        }
+        .legend-box h3 button:hover { background: #3c4043; }
+        .legend-item {
+            display: flex; align-items: center; gap: 6px;
+            padding: 4px 6px; margin-bottom: 1px;
+            border-radius: 3px; cursor: pointer;
+            font-size: 12px;
+            border-left: 3px solid transparent;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .legend-item:hover { background: #2f3439; }
+        .legend-item.active {
+            background: #3d4a5c;
+            border-left-color: #8ab4f8;
+        }
+        .legend-color {
+            width: 12px; height: 12px; border-radius: 2px;
+            flex-shrink: 0;
+        }
+        .legend-item .count {
+            margin-left: auto; color: #80868b; font-size: 11px;
         }
 
         #canvasWrap {
-            position: relative;
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            overflow: hidden;
-            cursor: grab;
-            height: 700px;
+            position: relative; flex: 1;
+            background: #202327;
+            border: 1px solid #3c4043; border-radius: 6px;
+            overflow: hidden; cursor: grab;
         }
-
-        #canvasWrap.dragging {
-            cursor: grabbing;
-        }
-
-        canvas {
-            display: block;
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
+        #canvasWrap.dragging { cursor: grabbing; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
 
         .hud {
-            position: absolute;
-            top: 8px;
-            background: rgba(13, 17, 23, 0.85);
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            padding: 3px 8px;
-            font-size: 12px;
-            color: #8b949e;
+            position: absolute; top: 8px;
+            background: rgba(26, 29, 33, 0.9);
+            border: 1px solid #3c4043; border-radius: 4px;
+            padding: 3px 8px; font-size: 11px; color: #9aa0a6;
             pointer-events: none;
         }
-
-        .hud b {
-            color: #58a6ff;
-        }
-
-        #coordInfo {
-            left: 8px;
-        }
-
-        #zoomInfo {
-            right: 8px;
-        }
+        .hud b { color: #8ab4f8; }
+        #coordInfo { left: 8px; }
+        #zoomInfo { right: 8px; }
 
         #tooltip {
-            position: fixed;
-            pointer-events: none;
-            background: rgba(13, 17, 23, 0.98);
-            border: 1px solid #58a6ff;
-            border-radius: 4px;
-            padding: 6px 10px;
-            font-size: 12px;
-            color: #c9d1d9;
-            white-space: nowrap;
-            display: none;
-            z-index: 9999;
+            position: fixed; pointer-events: none;
+            background: rgba(26, 29, 33, 0.98);
+            border: 1px solid #5c7a99; border-radius: 5px;
+            padding: 6px 10px; font-size: 11px; color: #d4d8dd;
+            white-space: nowrap; display: none; z-index: 9999;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            line-height: 1.5;
         }
 
-        #legend {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 8px;
+        #listPanel {
+            width: 250px; flex-shrink: 0;
+            background: #25292e;
+            border: 1px solid #3c4043; border-radius: 6px;
+            padding: 8px; overflow-y: auto;
             font-size: 12px;
-            color: #8b949e;
         }
+        #listPanel h3 {
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; background: #25292e;
+            padding: 2px 0; z-index: 1;
+        }
+        .vein-item {
+            padding: 4px 6px; margin-bottom: 3px;
+            border-radius: 4px; cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background 0.1s;
+        }
+        .vein-item:hover { background: #2f3439; }
+        .vein-item.active { background: #3d4a5c; border-left-color: #8ab4f8; }
+        .vein-item .name { color: #d4d8dd; display: flex; justify-content: space-between; }
+        .vein-item .coord { color: #80868b; font-size: 11px; display: flex; justify-content: space-between; margin-top: 1px; }
+        .vein-item .dist { color: #8ab4f8; }
+        .vein-item .oil { color: #c9a86a; font-size: 11px; margin-top: 1px; }
 
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .legend-color {
-            width: 14px;
-            height: 14px;
-            border-radius: 2px;
-            display: inline-block;
-        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5f6368; }
     </style>
 </head>
 
 <body>
 
-    <h1>CDG 油田缓存可视化</h1>
+    <h1>CDG 油田可视化</h1>
 
     <div class="toolbar">
-        <label>缓存文件<input type="file" id="fileInput" accept=".json"></label>
+        <label class="mode-switch" title="切换数据来源：定时刷新 或 外部导入">
+            <input type="checkbox" id="modeSwitch">
+            <span class="slider"></span>
+            <span id="modeLabel">导入</span>
+        </label>
+        <label id="fileLabel">缓存文件<input type="file" id="fileInput" accept=".json"></label>
+        <label>基地X<input type="number" id="baseX" value="0" step="16"></label>
+        <label>基地Z<input type="number" id="baseZ" value="0" step="16"></label>
         <label>无限阈值<input type="number" id="infiniteThreshold" value="40000000" min="1" step="1000000"></label>
-        <label>最小油量<input type="number" id="minOil" value="0" min="0" step="100000"></label>
-        <button id="renderBtn">渲染</button>
+        <label id="intervalLabel" style="display:none;">刷新(秒)<input type="number" id="refreshInterval" value="3" min="1" step="1"></label>
+        <label>关键词<input type="text" id="keyword" placeholder="坐标或油量"></label>
         <button id="resetViewBtn">重置视图</button>
-        <button id="topBtn">Top 20</button>
+        <button id="fitViewBtn">适应窗口</button>
+        <button id="goBaseBtn">跳转基地</button>
+        <button id="clearFilterBtn">清除筛选</button>
         <button id="highlightInfiniteBtn" class="highlight">高亮无限</button>
         <span class="status" id="status">等待加载...</span>
     </div>
 
     <div class="stats">
-        <span>总<b id="totalCount">0</b></span>
+        <span>总区块<b id="totalCount">0</b></span>
         <span>有油<b id="oilCount">0</b></span>
         <span>无油<b id="zeroCount">0</b></span>
-        <span>未缓存<b id="missingCount">0</b></span>
         <span>无限<b id="infiniteCount">0</b></span>
-        <span>维度<b id="dimList">-</b></span>
+        <span>基地<b id="baseInfo">(0, 0)</b></span>
+        <span>当前显示<b id="visibleCount">0</b></span>
     </div>
 
-    <div id="canvasWrap">
-        <canvas id="canvas"></canvas>
-        <div class="hud" id="coordInfo">方块 -,- | 区块 -,-</div>
-        <div class="hud" id="zoomInfo">100%</div>
+    <div id="main">
+        <div id="legends">
+            <div class="legend-box">
+                <h3>按储量分类 <button id="clearReserveFilter">全部</button></h3>
+                <div id="reserveLegend"></div>
+            </div>
+            <div class="legend-box">
+                <h3>按状态分类 <button id="clearStatusFilter">全部</button></h3>
+                <div id="statusLegend"></div>
+            </div>
+        </div>
+
+        <div id="canvasWrap">
+            <canvas id="canvas"></canvas>
+            <div class="hud" id="coordInfo">区块 -,- | 方块 -,-</div>
+            <div class="hud" id="zoomInfo">100%</div>
+        </div>
+
+        <div id="listPanel">
+            <h3>油田列表（油量↓ 距离↑） <span id="listCount" style="color:#80868b;font-weight:normal;">0</span></h3>
+            <div id="veinList"></div>
+        </div>
     </div>
 
     <div id="tooltip"></div>
 
-    <div id="legend">
-        <div class="legend-item"><span class="legend-color"
-                style="background:#0d1117;border:1px solid #30363d"></span>未缓存</div>
-        <div class="legend-item"><span class="legend-color" style="background:#6e7681"></span>无油</div>
-        <div class="legend-item"><span class="legend-color" style="background:#1f6feb"></span>几乎枯竭</div>
-        <div class="legend-item"><span class="legend-color" style="background:#00bcd4"></span>微量</div>
-        <div class="legend-item"><span class="legend-color" style="background:#3fb950"></span>低</div>
-        <div class="legend-item"><span class="legend-color" style="background:#d29922"></span>中等</div>
-        <div class="legend-item"><span class="legend-color" style="background:#f0883e"></span>高</div>
-        <div class="legend-item"><span class="legend-color" style="background:#f85149"></span>非常高</div>
-        <div class="legend-item"><span class="legend-color" style="background:#a371f7"></span>无限</div>
-        <div class="legend-item"><span class="legend-color"
-                style="background:transparent;border:2px solid #f0f6fc"></span>高亮</div>
-    </div>
-
     <script>
         // ==================== 常量 ====================
-        const RATIO_BOUNDS = [0, 0.10, 0.25, 0.40, 0.55, 0.75, 1.0];
-        const LEVELS = [
-            { label: '无油', color: '#6e7681' },
-            { label: '几乎枯竭', color: '#1f6feb' },
-            { label: '微量', color: '#00bcd4' },
-            { label: '低', color: '#3fb950' },
-            { label: '中等', color: '#d29922' },
-            { label: '高', color: '#f0883e' },
-            { label: '非常高', color: '#f85149' },
+        const CACHE_PATH = 'cdg_oil_cache.json';
+        const SELECTED_COLOR = '#00e5ff';
+
+        const RESERVE_LEVELS = [
+            { id: 'infinite', label: '无限 (≥100%)',      color: '#b388ff', min: 1.00,  max: Infinity },
+            { id: 'full',     label: '高 (75-100%)',       color: '#ef5350', min: 0.75,  max: 1.00 },
+            { id: 'mid',      label: '中 (55-75%)',        color: '#ff9800', min: 0.55,  max: 0.75 },
+            { id: 'low',      label: '低 (40-55%)',        color: '#ffca28', min: 0.40,  max: 0.55 },
+            { id: 'trace',    label: '微量 (25-40%)',      color: '#66bb6a', min: 0.25,  max: 0.40 },
+            { id: 'tiny',     label: '极少 (10-25%)',      color: '#26c6da', min: 0.10,  max: 0.25 },
+            { id: 'critical', label: '几乎枯竭 (2.5-10%)', color: '#42a5f5', min: 0.025, max: 0.10 },
+            { id: 'empty',    label: '无油 (<2.5%)',       color: '#6e7681', min: -1,    max: 0.025 },
         ];
-        const INFINITE_LEVEL = { label: '无限', color: '#a371f7' };
+
+        const STATUS_LEVELS = [
+            { id: 'infinite', label: '无限油田', color: '#b388ff' },
+            { id: 'oil',      label: '有油区块', color: '#66bb6a' },
+            { id: 'zero',     label: '无油区块', color: '#6e7681' },
+        ];
 
         // ==================== 状态 ====================
         const state = {
             blocks: [],
+            visible: [],
             blockMap: new Map(),
             dimBounds: {},
             currentDim: null,
-            baseCellSize: 8,
-            zoom: 1.0,
             panX: 0,
             panY: 0,
-            minOil: 0,
+            _scale: 1.0,
             infiniteThreshold: 40000000,
             highlightInfinite: false,
-            // 离屏画布
+            keyword: '',
+            baseX: 0,
+            baseZ: 0,
+            reserveFilter: new Set(),
+            statusFilter: new Set(),
+            selectedKey: null,
+            useAutoRefresh: false,
+            autoRefresh: false,
+            timer: null,
+            cacheData: {},
             offscreen: null,
+            offscreenW: 0,
+            offscreenH: 0,
             offscreenDirty: true,
-            offscreenDim: null,
-            offscreenThreshold: 0,
-            offscreenMinOil: 0,
+            offscreenKey: '',
+            reserveCounts: {},
+            statusCounts: {},
         };
 
         // ==================== DOM ====================
@@ -277,22 +290,63 @@
         const tooltip = $('tooltip');
         const coordInfo = $('coordInfo');
         const zoomInfo = $('zoomInfo');
+        const veinList = $('veinList');
+        const reserveLegend = $('reserveLegend');
+        const statusLegend = $('statusLegend');
 
         // ==================== 工具 ====================
-        function getOilLevel(oil, max) {
-            if (oil >= max) return INFINITE_LEVEL;
-            if (oil <= 0) return LEVELS[0];
-            const r = oil / max;
-            for (let i = 1; i < RATIO_BOUNDS.length; i++) {
-                if (r < RATIO_BOUNDS[i]) return LEVELS[i];
-            }
-            return LEVELS[LEVELS.length - 1];
-        }
-
         function setStatus(msg, isError = false) {
             const el = $('status');
             el.textContent = msg;
-            el.style.color = isError ? '#f85149' : '#8b949e';
+            el.style.color = isError ? '#ef5350' : '#9aa0a6';
+        }
+
+        function getOilLevel(oil, max) {
+            if (oil >= max) return RESERVE_LEVELS[0];
+            if (oil <= 0) return RESERVE_LEVELS[RESERVE_LEVELS.length - 1];
+            const r = oil / max;
+            for (let i = 1; i < RESERVE_LEVELS.length - 1; i++) {
+                const lv = RESERVE_LEVELS[i];
+                if (r >= lv.min && r < lv.max) return lv;
+            }
+            return RESERVE_LEVELS[RESERVE_LEVELS.length - 2];
+        }
+
+        function distanceToBase(block) {
+            const bx = block.x * 16;
+            const bz = block.z * 16;
+            const dx = bx - state.baseX;
+            const dz = bz - state.baseZ;
+            return Math.sqrt(dx * dx + dz * dz);
+        }
+
+        function formatNumber(n) {
+            if (n === Infinity) return '∞';
+            return n.toLocaleString();
+        }
+
+        function blockKey(b) {
+            return `${b.dim}|${b.x} ${b.z}`;
+        }
+
+        // ==================== 坐标转换 ====================
+        /**
+         * 把鼠标事件坐标换算成 canvas 内部像素坐标
+         */
+        function getCanvasMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+            return { x: sx, y: sy };
+        }
+
+        function screenToWorld(screenX, screenY) {
+            const bounds = state.dimBounds[state.currentDim];
+            const scale = state._scale;
+            return {
+                x: (screenX - state.panX) / scale + bounds.minX,
+                z: (screenY - state.panY) / scale + bounds.minZ,
+            };
         }
 
         // ==================== 渲染调度 ====================
@@ -310,227 +364,571 @@
         function renderOffscreen() {
             if (!state.currentDim) return;
             const bounds = state.dimBounds[state.currentDim];
-            const width = bounds.maxX - bounds.minX + 1;
-            const height = bounds.maxZ - bounds.minZ + 1;
-            const cs = state.baseCellSize;
+            const off = {
+                w: Math.max(1, Math.ceil(wrap.clientWidth)),
+                h: Math.max(1, Math.ceil(wrap.clientHeight)),
+            };
 
-            const cacheValid = state.offscreen
-                && state.offscreen.width === width * cs
-                && state.offscreen.height === height * cs
-                && !state.offscreenDirty
-                && state.offscreenDim === state.currentDim
-                && state.offscreenThreshold === state.infiniteThreshold
-                && state.offscreenMinOil === state.minOil;
+            const cacheKey = [
+                state.currentDim, off.w, off.h,
+                state._scale.toFixed(6),
+                state.panX.toFixed(2), state.panY.toFixed(2),
+                state.baseX, state.baseZ, state.infiniteThreshold,
+                Array.from(state.reserveFilter).sort().join(','),
+                Array.from(state.statusFilter).sort().join(','),
+                state.keyword, state.selectedKey || '',
+            ].join('|');
 
-            if (cacheValid) return;
+            if (state.offscreen && !state.offscreenDirty && state.offscreenKey === cacheKey) return;
 
-            if (!state.offscreen || state.offscreen.width !== width * cs || state.offscreen.height !== height * cs) {
+            if (!state.offscreen || state.offscreenW !== off.w || state.offscreenH !== off.h) {
                 state.offscreen = document.createElement('canvas');
-                state.offscreen.width = width * cs;
-                state.offscreen.height = height * cs;
+                state.offscreen.width = off.w;
+                state.offscreen.height = off.h;
+                state.offscreenW = off.w;
+                state.offscreenH = off.h;
             }
 
             const octx = state.offscreen.getContext('2d');
-            octx.fillStyle = '#0d1117';
-            octx.fillRect(0, 0, state.offscreen.width, state.offscreen.height);
+            octx.fillStyle = '#202327';
+            octx.fillRect(0, 0, off.w, off.h);
 
-            for (const b of state.blocks) {
-                if (b.dim !== state.currentDim || b.oil < state.minOil) continue;
-                const px = (b.x - bounds.minX) * cs;
-                const py = (b.z - bounds.minZ) * cs;
-                octx.fillStyle = getOilLevel(b.oil, state.infiniteThreshold).color;
-                octx.fillRect(px, py, cs, cs);
+            const scale = state._scale;
+            // 关键：world 整数点 (wx, wz) 映射到屏幕的**左上角**位置
+            const toScreenX = (wx) => (wx - bounds.minX) * scale + state.panX;
+            const toScreenY = (wz) => (wz - bounds.minZ) * scale + state.panY;
+
+            const viewLeft = -state.panX / scale + bounds.minX;
+            const viewTop = -state.panY / scale + bounds.minZ;
+            const viewRight = (off.w - state.panX) / scale + bounds.minX;
+            const viewBottom = (off.h - state.panY) / scale + bounds.minZ;
+
+            const cellSize = Math.max(2, scale);
+
+            // 普通油田：以 (px, py) 为左上角绘制
+            for (let i = 0; i < state.visible.length; i++) {
+                const b = state.visible[i];
+                if (b.dim !== state.currentDim) continue;
+                if (b.x < viewLeft - 1 || b.x > viewRight + 1) continue;
+                if (b.z < viewTop - 1 || b.z > viewBottom + 1) continue;
+
+                const px = toScreenX(b.x);
+                const py = toScreenY(b.z);
+                const lv = getOilLevel(b.oil, state.infiniteThreshold);
+                octx.fillStyle = lv.color;
+                octx.fillRect(px, py, cellSize, cellSize);
+            }
+
+            // 基地标记：world 点 (baseX/16, baseZ/16) 是该区块左上角，标记应放在区块中心
+            const bx = toScreenX(state.baseX / 16) + scale / 2;
+            const by = toScreenY(state.baseZ / 16) + scale / 2;
+            if (bx > -20 && bx < off.w + 20 && by > -20 && by < off.h + 20) {
+                octx.save();
+                octx.shadowColor = '#e8eaed';
+                octx.shadowBlur = 8;
+                octx.strokeStyle = '#e8eaed';
+                octx.lineWidth = 2;
+                const s = 8;
+                octx.beginPath();
+                octx.moveTo(bx - s, by);
+                octx.lineTo(bx + s, by);
+                octx.moveTo(bx, by - s);
+                octx.lineTo(bx, by + s);
+                octx.stroke();
+                octx.beginPath();
+                octx.arc(bx, by, 4, 0, Math.PI * 2);
+                octx.stroke();
+                octx.restore();
+            }
+
+            // 选中高亮：方框覆盖整个区块
+            if (state.selectedKey && state.selectedKey.startsWith(state.currentDim + '|')) {
+                const parts = state.selectedKey.slice(state.currentDim.length + 1).split(' ');
+                const sx = Number(parts[0]);
+                const sz = Number(parts[1]);
+                const px = toScreenX(sx);
+                const py = toScreenY(sz);
+                if (px > -30 && px < off.w + 30 && py > -30 && py < off.h + 30) {
+                    octx.save();
+                    octx.shadowColor = SELECTED_COLOR;
+                    octx.shadowBlur = 10;
+                    octx.strokeStyle = SELECTED_COLOR;
+                    octx.lineWidth = Math.max(2, scale * 0.15);
+                    // 方框正好覆盖一个区块
+                    octx.strokeRect(px, py, Math.max(scale, 8), Math.max(scale, 8));
+                    octx.restore();
+                }
             }
 
             state.offscreenDirty = false;
-            state.offscreenDim = state.currentDim;
-            state.offscreenThreshold = state.infiniteThreshold;
-            state.offscreenMinOil = state.minOil;
+            state.offscreenKey = cacheKey;
         }
 
         // ==================== 渲染 ====================
         function render() {
             if (!state.currentDim) return;
-            const bounds = state.dimBounds[state.currentDim];
-            const width = bounds.maxX - bounds.minX + 1;
-            const height = bounds.maxZ - bounds.minZ + 1;
-
-            state.baseCellSize = Math.max(2, Math.min(
-                Math.floor(wrap.clientWidth / width),
-                Math.floor(wrap.clientHeight / height),
-                20
-            ));
-
             renderOffscreen();
 
-            const cs = state.baseCellSize * state.zoom;
-            canvas.width = width * cs;
-            canvas.height = height * cs;
-            canvas.style.width = canvas.width + 'px';
-            canvas.style.height = canvas.height + 'px';
-            canvas.style.left = state.panX + 'px';
-            canvas.style.top = state.panY + 'px';
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            if (canvas.width !== cw || canvas.height !== ch) {
+                canvas.width = cw;
+                canvas.height = ch;
+                canvas.style.width = cw + 'px';
+                canvas.style.height = ch + 'px';
+            }
 
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(state.offscreen, 0, 0, state.offscreen.width, state.offscreen.height,
-                0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#202327';
+            ctx.fillRect(0, 0, cw, ch);
 
+            if (state.offscreen) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(state.offscreen, 0, 0, state.offscreenW, state.offscreenH, 0, 0, cw, ch);
+            }
+
+            // 高亮无限：方框覆盖整个区块
             if (state.highlightInfinite) {
                 ctx.save();
-                ctx.shadowColor = '#f0f6fc';
-                ctx.shadowBlur = 8;
-                for (const b of state.blocks) {
-                    if (b.dim !== state.currentDim || b.oil < state.infiniteThreshold || b.oil < state.minOil) continue;
-                    const px = (b.x - bounds.minX) * cs;
-                    const py = (b.z - bounds.minZ) * cs;
-                    ctx.strokeStyle = '#f0f6fc';
-                    ctx.lineWidth = Math.max(2, cs * 0.2);
-                    ctx.strokeRect(px + ctx.lineWidth / 2, py + ctx.lineWidth / 2,
-                        cs - ctx.lineWidth, cs - ctx.lineWidth);
+                ctx.shadowColor = '#ffffff';
+                ctx.shadowBlur = 6;
+                const bounds = state.dimBounds[state.currentDim];
+                const scale = state._scale;
+                const cellSize = Math.max(6, scale);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                for (const b of state.visible) {
+                    if (b.dim !== state.currentDim || b.oil < state.infiniteThreshold) continue;
+                    const px = (b.x - bounds.minX) * scale + state.panX;
+                    const py = (b.z - bounds.minZ) * scale + state.panY;
+                    ctx.strokeRect(px, py, cellSize, cellSize);
                 }
                 ctx.restore();
             }
 
-            zoomInfo.textContent = `${(state.zoom * 100).toFixed(0)}%`;
+            const pxPerChunk = state._scale;
+            const worldW = cw / pxPerChunk;
+            const worldH = ch / pxPerChunk;
+            zoomInfo.textContent = `${pxPerChunk.toFixed(2)} px/区块 · 视口 ${Math.round(worldW)}×${Math.round(worldH)}`;
+        }
+
+        // ==================== 视图控制 ====================
+        function computeBestScale() {
+            const bounds = state.dimBounds[state.currentDim];
+            const worldW = bounds.maxX - bounds.minX + 1;
+            const worldH = bounds.maxZ - bounds.minZ + 1;
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            const fitScale = Math.min(cw / worldW, ch / worldH);
+            const minScale = 3 / 25;
+            return Math.min(Math.max(fitScale, minScale), 10);
         }
 
         function resetView() {
-            state.zoom = 1.0;
-            state.panX = 0;
-            state.panY = 0;
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const worldW = bounds.maxX - bounds.minX + 1;
+            const worldH = bounds.maxZ - bounds.minZ + 1;
+
+            state._scale = computeBestScale();
+
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            state.panX = (cw - worldW * state._scale) / 2;
+            state.panY = (ch - worldH * state._scale) / 2;
+
+            state.offscreenDirty = true;
             scheduleRender();
+        }
+
+        function goToWorld(wx, wz) {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            // 让 (wx, wz) 区块的**中心**位于屏幕中心
+            state.panX = cw / 2 - (wx - bounds.minX + 0.5) * state._scale;
+            state.panY = ch / 2 - (wz - bounds.minZ + 0.5) * state._scale;
+            state.offscreenDirty = true;
+            scheduleRender();
+        }
+
+        function goToBase() {
+            goToWorld(state.baseX / 16, state.baseZ / 16);
         }
 
         // ==================== 缩放/平移 ====================
         wrap.addEventListener('wheel', e => {
             if (!state.currentDim) return;
             e.preventDefault();
-            const rect = wrap.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-            const oldZoom = state.zoom;
+            const p = getCanvasMousePos(e);
+            const mx = p.x, my = p.y;
+
+            const oldScale = state._scale;
             const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-            state.zoom = Math.max(0.1, Math.min(10, state.zoom * factor));
-            state.panX = mx - (mx - state.panX) * (state.zoom / oldZoom);
-            state.panY = my - (my - state.panY) * (state.zoom / oldZoom);
+            state._scale = Math.max(0.001, Math.min(50, state._scale * factor));
+
+            state.panX = mx - (mx - state.panX) * (state._scale / oldScale);
+            state.panY = my - (my - state.panY) * (state._scale / oldScale);
+
+            state.offscreenDirty = true;
             scheduleRender();
         }, { passive: false });
 
         let dragging = false, dsx = 0, dsy = 0, dspx = 0, dspy = 0;
+        let dragMoved = false;
         wrap.addEventListener('mousedown', e => {
             if (e.button !== 0) return;
             dragging = true;
+            dragMoved = false;
             wrap.classList.add('dragging');
             dsx = e.clientX; dsy = e.clientY;
             dspx = state.panX; dspy = state.panY;
         });
         window.addEventListener('mousemove', e => {
             if (!dragging) return;
-            state.panX = dspx + (e.clientX - dsx);
-            state.panY = dspy + (e.clientY - dsy);
-            canvas.style.left = state.panX + 'px';
-            canvas.style.top = state.panY + 'px';
+            const dx = e.clientX - dsx;
+            const dy = e.clientY - dsy;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+            state.panX = dspx + dx;
+            state.panY = dspy + dy;
+            state.offscreenDirty = true;
             scheduleRender();
         });
-        window.addEventListener('mouseup', () => {
-            if (dragging) { dragging = false; wrap.classList.remove('dragging'); }
+        window.addEventListener('mouseup', e => {
+            if (dragging) {
+                dragging = false;
+                wrap.classList.remove('dragging');
+                if (!dragMoved) handleCanvasClick(e);
+            }
         });
+
+        // ==================== 画布点击 ====================
+        function handleCanvasClick(e) {
+            const p = getCanvasMousePos(e);
+            const wp = screenToWorld(p.x, p.y);
+
+            const cx = Math.floor(wp.x);
+            const cz = Math.floor(wp.z);
+            const key = `${state.currentDim}|${cx} ${cz}`;
+            const found = state.blockMap.get(key);
+
+            if (found) {
+                state.selectedKey = key;
+                state.offscreenDirty = true;
+                scheduleRender();
+                updateListPanel();
+                const el = document.querySelector(`.vein-item[data-key="${key}"]`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else if (state.selectedKey) {
+                state.selectedKey = null;
+                state.offscreenDirty = true;
+                scheduleRender();
+                updateListPanel();
+            }
+        }
 
         // ==================== 悬停 ====================
         canvas.addEventListener('mousemove', e => {
-            if (dragging) return;
-            const rect = canvas.getBoundingClientRect();
-            const cs = state.baseCellSize * state.zoom;
-            const bounds = state.dimBounds[state.currentDim];
-            const cx = Math.floor((e.clientX - rect.left) / cs) + bounds.minX;
-            const cz = Math.floor((e.clientY - rect.top) / cs) + bounds.minZ;
-            const bx = cx * 16, bz = cz * 16;
+            if (dragging) {
+                tooltip.style.display = 'none';
+                return;
+            }
+            const p = getCanvasMousePos(e);
+            const wp = screenToWorld(p.x, p.y);
 
-            coordInfo.innerHTML = `方块 <b>${bx}</b>,<b>${bz}</b> | 区块 <b>${cx}</b>,<b>${cz}</b>`;
+            const cx = Math.floor(wp.x);
+            const cz = Math.floor(wp.z);
+            coordInfo.innerHTML = `区块 <b>${cx}</b>,<b>${cz}</b> | 方块 <b>${cx * 16}</b>,<b>${cz * 16}</b>`;
 
             const found = state.blockMap.get(`${state.currentDim}|${cx} ${cz}`);
-            tooltip.style.display = 'block';
-
-            const tw = 260, th = 110, pad = 15;
-            let left = e.clientX + pad, top = e.clientY + pad;
-            if (left + tw > window.innerWidth) left = e.clientX - tw - pad;
-            if (top + th > window.innerHeight) top = e.clientY - th - pad;
-            if (left < 0) left = pad;
-            if (top < 0) top = pad;
-            tooltip.style.left = left + 'px';
-            tooltip.style.top = top + 'px';
 
             if (found) {
+                tooltip.style.display = 'block';
+                const tw = 280, th = 150, pad = 15;
+                let left = e.clientX + pad, top = e.clientY + pad;
+                if (left + tw > window.innerWidth) left = e.clientX - tw - pad;
+                if (top + th > window.innerHeight) top = e.clientY - th - pad;
+                if (left < 0) left = pad;
+                if (top < 0) top = pad;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+
                 const lv = getOilLevel(found.oil, state.infiniteThreshold);
                 const pct = ((found.oil / state.infiniteThreshold) * 100).toFixed(2);
                 const inf = found.oil >= state.infiniteThreshold;
+                const dist = distanceToBase(found);
                 tooltip.innerHTML =
-                    `方块 (${bx}, ${bz})<br>` +
                     `区块 (${cx}, ${cz})<br>` +
-                    `油量：<b style="color:${lv.color}">${found.oil.toLocaleString()} mB</b><br>` +
+                    `方块 (${cx * 16}, ${cz * 16})<br>` +
+                    `油量：<b style="color:${lv.color}">${formatNumber(found.oil)} mB</b><br>` +
                     `等级：<b style="color:${lv.color}">${lv.label}</b> (${pct}%)` +
-                    (inf ? '<br><span style="color:#f0f6fc">★ 无限油田</span>' : '');
+                    (inf ? '<br><span style="color:#b388ff">★ 无限油田</span>' : '') +
+                    `<br>距基地：<b style="color:#8ab4f8">${dist.toFixed(0)} 方块</b>`;
             } else {
-                tooltip.innerHTML =
-                    `方块 (${bx}, ${bz})<br>` +
-                    `区块 (${cx}, ${cz})<br>` +
-                    `状态：<b style="color:#58a6ff">未缓存</b>`;
+                tooltip.style.display = 'none';
             }
         });
 
         canvas.addEventListener('mouseleave', () => {
             tooltip.style.display = 'none';
-            coordInfo.innerHTML = '方块 -,- | 区块 -,-';
+            coordInfo.innerHTML = '区块 -,- | 方块 -,-';
         });
 
-        // ==================== 增量边界更新 ====================
-        function updateBounds(b) {
-            if (!state.dimBounds[b.dim]) {
-                state.dimBounds[b.dim] = { minX: b.x, maxX: b.x, minZ: b.z, maxZ: b.z };
-                return true;
+        // ==================== 统计 ====================
+        function recalcStats() {
+            state.reserveCounts = {};
+            state.statusCounts = {};
+            for (const b of state.blocks) {
+                const lv = getOilLevel(b.oil, state.infiniteThreshold);
+                state.reserveCounts[lv.id] = (state.reserveCounts[lv.id] || 0) + 1;
+
+                if (b.oil >= state.infiniteThreshold) {
+                    state.statusCounts['infinite'] = (state.statusCounts['infinite'] || 0) + 1;
+                } else if (b.oil > 0) {
+                    state.statusCounts['oil'] = (state.statusCounts['oil'] || 0) + 1;
+                } else {
+                    state.statusCounts['zero'] = (state.statusCounts['zero'] || 0) + 1;
+                }
             }
-            const d = state.dimBounds[b.dim];
-            let changed = false;
-            if (b.x < d.minX) { d.minX = b.x; changed = true; }
-            if (b.x > d.maxX) { d.maxX = b.x; changed = true; }
-            if (b.z < d.minZ) { d.minZ = b.z; changed = true; }
-            if (b.z > d.maxZ) { d.maxZ = b.z; changed = true; }
-            return changed;
+        }
+
+        // ==================== 图例 ====================
+        function buildLegends() {
+            reserveLegend.innerHTML = '';
+            for (const lv of RESERVE_LEVELS) {
+                const count = state.reserveCounts[lv.id] || 0;
+                const el = document.createElement('div');
+                el.className = 'legend-item' + (state.reserveFilter.has(lv.id) ? ' active' : '');
+                el.innerHTML = `<span class="legend-color" style="background:${lv.color}"></span>
+                    <span>${lv.label}</span><span class="count">${count}</span>`;
+                el.onclick = () => {
+                    if (state.reserveFilter.has(lv.id)) state.reserveFilter.delete(lv.id);
+                    else state.reserveFilter.add(lv.id);
+                    applyFilter();
+                    buildLegends();
+                };
+                reserveLegend.appendChild(el);
+            }
+
+            statusLegend.innerHTML = '';
+            for (const lv of STATUS_LEVELS) {
+                const count = state.statusCounts[lv.id] || 0;
+                const el = document.createElement('div');
+                el.className = 'legend-item' + (state.statusFilter.has(lv.id) ? ' active' : '');
+                el.innerHTML = `<span class="legend-color" style="background:${lv.color}"></span>
+                    <span>${lv.label}</span><span class="count">${count}</span>`;
+                el.onclick = () => {
+                    if (state.statusFilter.has(lv.id)) state.statusFilter.delete(lv.id);
+                    else state.statusFilter.add(lv.id);
+                    applyFilter();
+                    buildLegends();
+                };
+                statusLegend.appendChild(el);
+            }
+        }
+
+        // ==================== 过滤 ====================
+        function applyFilter() {
+            const kw = state.keyword.toLowerCase().trim();
+            const hasReserve = state.reserveFilter.size > 0;
+            const hasStatus = state.statusFilter.size > 0;
+
+            const visible = [];
+            for (const b of state.blocks) {
+                if (hasReserve) {
+                    const lv = getOilLevel(b.oil, state.infiniteThreshold);
+                    if (!state.reserveFilter.has(lv.id)) continue;
+                }
+                if (hasStatus) {
+                    let id;
+                    if (b.oil >= state.infiniteThreshold) id = 'infinite';
+                    else if (b.oil > 0) id = 'oil';
+                    else id = 'zero';
+                    if (!state.statusFilter.has(id)) continue;
+                }
+                if (kw) {
+                    const s = `${b.x} ${b.z} ${b.x * 16} ${b.z * 16} ${b.oil}`.toLowerCase();
+                    if (!s.includes(kw)) continue;
+                }
+                visible.push(b);
+            }
+
+            state.visible = visible;
+            state.offscreenDirty = true;
+            scheduleRender();
+            updateStats();
+            updateListPanel();
         }
 
         // ==================== 统计 ====================
         function updateStats() {
-            const { blocks, dimBounds, currentDim } = state;
+            const { blocks, visible } = state;
             const withOil = blocks.filter(b => b.oil > 0).length;
             const zero = blocks.filter(b => b.oil === 0).length;
             const inf = blocks.filter(b => b.oil >= state.infiniteThreshold).length;
-            const dims = [...new Set(blocks.map(b => b.dim))];
 
             $('totalCount').textContent = blocks.length.toLocaleString();
             $('oilCount').textContent = withOil.toLocaleString();
             $('zeroCount').textContent = zero.toLocaleString();
             $('infiniteCount').textContent = inf.toLocaleString();
-            $('dimList').textContent = dims.join(', ') || '-';
+            $('visibleCount').textContent = visible.length.toLocaleString();
+            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
+        }
 
-            if (currentDim && dimBounds[currentDim]) {
-                const b = dimBounds[currentDim];
-                const area = (b.maxX - b.minX + 1) * (b.maxZ - b.minZ + 1);
-                $('missingCount').textContent = (area - blocks.length).toLocaleString();
+        // ==================== 列表 ====================
+        function updateListPanel() {
+            if (!state.currentDim) return;
+            const visible = state.visible.filter(b => b.dim === state.currentDim);
+
+            visible.sort((a, b) => {
+                if (b.oil !== a.oil) return b.oil - a.oil;
+                return distanceToBase(a) - distanceToBase(b);
+            });
+
+            $('listCount').textContent = visible.length;
+
+            if (visible.length === 0) {
+                veinList.innerHTML = '<div style="color:#80868b;padding:6px;">无匹配区块</div>';
+                return;
+            }
+
+            let html = '';
+            for (let i = 0; i < Math.min(visible.length, 300); i++) {
+                const b = visible[i];
+                const key = blockKey(b);
+                const isSelected = state.selectedKey === key;
+                const lv = getOilLevel(b.oil, state.infiniteThreshold);
+                const dist = distanceToBase(b);
+                const pct = ((b.oil / state.infiniteThreshold) * 100).toFixed(0);
+                html += `<div class="vein-item${isSelected ? ' active' : ''}" data-key="${key}">
+                    <div class="name">
+                        <span>(${b.x}, ${b.z})</span>
+                        <span class="dist">${dist.toFixed(0)}</span>
+                    </div>
+                    <div class="coord">
+                        <span>方块 (${b.x * 16}, ${b.z * 16})</span>
+                        <span style="color:${lv.color}">${pct}%</span>
+                    </div>
+                    <div class="oil">油量 ${formatNumber(b.oil)}</div>
+                </div>`;
+            }
+            if (visible.length > 300) {
+                html += `<div style="color:#80868b;padding:4px;">...还有 ${visible.length - 300} 条</div>`;
+            }
+            veinList.innerHTML = html;
+
+            veinList.querySelectorAll('.vein-item').forEach(el => {
+                el.onclick = () => {
+                    const key = el.dataset.key;
+                    const b = visible.find(x => blockKey(x) === key);
+                    if (b) {
+                        state.selectedKey = key;
+                        goToWorld(b.x, b.z);
+                        state.offscreenDirty = true;
+                        scheduleRender();
+                        updateListPanel();
+                    }
+                };
+            });
+        }
+
+        // ==================== 定时加载 ====================
+        async function loadCache() {
+            try {
+                const resp = await fetch(CACHE_PATH + '?t=' + Date.now());
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+
+                let newCount = 0;
+                let changed = false;
+
+                for (const key in data) {
+                    if (state.cacheData[key] !== data[key]) {
+                        state.cacheData[key] = data[key];
+                        const [dim, coord] = key.split('|');
+                        if (!coord) continue;
+                        const [x, z] = coord.split(' ').map(Number);
+                        if (isNaN(x) || isNaN(z)) continue;
+
+                        const b = { dim, x, z, oil: data[key] };
+                        state.blocks.push(b);
+                        state.blockMap.set(key, b);
+                        updateBounds(b);
+                        changed = true;
+                        newCount++;
+                    }
+                }
+
+                if (!changed) {
+                    setStatus(`已刷新 ${new Date().toLocaleTimeString()} · ${state.blocks.length} 条（无变化）`);
+                    return;
+                }
+
+                const dims = Object.keys(state.dimBounds);
+                if (dims.length === 0) { setStatus('缓存为空', true); return; }
+                if (!state.currentDim || !state.dimBounds[state.currentDim]) {
+                    state.currentDim = dims[0];
+                    resetView();
+                }
+
+                recalcStats();
+                buildLegends();
+                state.visible = state.blocks.slice();
+                state.offscreenDirty = true;
+                updateStats();
+                updateListPanel();
+                scheduleRender();
+                setStatus(`已刷新 ${new Date().toLocaleTimeString()} · ${state.blocks.length} 条（+${newCount}）`);
+            } catch (err) {
+                setStatus(`失败：${err.message}`, true);
             }
         }
 
-        // ==================== 加载文件 ====================
+        function updateBounds(b) {
+            if (!state.dimBounds[b.dim]) {
+                state.dimBounds[b.dim] = { minX: b.x, maxX: b.x, minZ: b.z, maxZ: b.z };
+                return;
+            }
+            const d = state.dimBounds[b.dim];
+            if (b.x < d.minX) d.minX = b.x;
+            if (b.x > d.maxX) d.maxX = b.x;
+            if (b.z < d.minZ) d.minZ = b.z;
+            if (b.z > d.maxZ) d.maxZ = b.z;
+        }
+
+        function scheduleNext() {
+            if (!state.autoRefresh || !state.useAutoRefresh) return;
+            const sec = Math.max(1, Number($('refreshInterval').value) || 3);
+            state.timer = setTimeout(async () => {
+                await loadCache();
+                scheduleNext();
+            }, sec * 1000);
+        }
+
+        function startAuto() {
+            stopAuto();
+            state.autoRefresh = true;
+            scheduleNext();
+        }
+
+        function stopAuto() {
+            if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+            state.autoRefresh = false;
+        }
+
+        // ==================== 文件导入 ====================
         function loadFromFile(file) {
             const reader = new FileReader();
             reader.onload = (ev) => {
                 try {
                     const data = JSON.parse(ev.target.result);
 
-                    // 清空旧数据
                     state.blocks = [];
                     state.blockMap.clear();
                     state.dimBounds = {};
                     state.currentDim = null;
+                    state.cacheData = {};
+                    state.selectedKey = null;
 
                     for (const key in data) {
                         const oil = data[key];
@@ -543,6 +941,7 @@
                         const b = { dim, x, z, oil };
                         state.blocks.push(b);
                         state.blockMap.set(key, b);
+                        state.cacheData[key] = oil;
                         updateBounds(b);
                     }
 
@@ -553,10 +952,13 @@
                     }
 
                     state.currentDim = dims[0];
-                    state.offscreenDirty = true;
 
+                    recalcStats();
+                    buildLegends();
+                    state.visible = state.blocks.slice();
                     resetView();
                     updateStats();
+                    updateListPanel();
                     scheduleRender();
                     setStatus(`已加载 ${file.name} · ${state.blocks.length} 条`);
                 } catch (err) {
@@ -567,31 +969,82 @@
         }
 
         // ==================== 事件 ====================
+        $('modeSwitch').onchange = e => {
+            state.useAutoRefresh = e.target.checked;
+            $('modeLabel').textContent = state.useAutoRefresh ? '定时' : '导入';
+            $('fileLabel').style.display = state.useAutoRefresh ? 'none' : 'inline';
+            $('intervalLabel').style.display = state.useAutoRefresh ? 'inline' : 'none';
+
+            if (state.useAutoRefresh) {
+                startAuto();
+                setStatus('已切换到定时刷新模式');
+            } else {
+                stopAuto();
+                setStatus('已切换到导入模式，请选择缓存文件');
+            }
+        };
+
         $('fileInput').onchange = e => {
             const file = e.target.files[0];
             if (file) loadFromFile(file);
         };
 
-        $('renderBtn').onclick = () => {
+        $('resetViewBtn').onclick = resetView;
+        $('fitViewBtn').onclick = resetView;
+        $('goBaseBtn').onclick = goToBase;
+
+        $('clearFilterBtn').onclick = () => {
+            state.reserveFilter.clear();
+            state.statusFilter.clear();
+            state.keyword = '';
+            $('keyword').value = '';
+            applyFilter();
+            buildLegends();
+        };
+
+        $('clearReserveFilter').onclick = () => {
+            state.reserveFilter.clear();
+            applyFilter();
+            buildLegends();
+        };
+
+        $('clearStatusFilter').onclick = () => {
+            state.statusFilter.clear();
+            applyFilter();
+            buildLegends();
+        };
+
+        $('keyword').oninput = () => {
+            state.keyword = $('keyword').value;
+            applyFilter();
+        };
+
+        $('infiniteThreshold').onchange = () => {
             state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
-            state.minOil = Number($('minOil').value) || 0;
+            recalcStats();
+            buildLegends();
+            applyFilter();
             state.offscreenDirty = true;
             scheduleRender();
+        };
+
+        $('baseX').oninput = () => {
+            state.baseX = Number($('baseX').value) || 0;
             updateStats();
+            updateListPanel();
+            state.offscreenDirty = true;
+            scheduleRender();
         };
 
-        $('resetViewBtn').onclick = resetView;
-
-        $('topBtn').onclick = () => {
-            const sorted = [...state.blocks].sort((a, b) => b.oil - a.oil).slice(0, 20);
-            const lines = sorted.map((b, i) => {
-                const lv = getOilLevel(b.oil, state.infiniteThreshold);
-                const pct = ((b.oil / state.infiniteThreshold) * 100).toFixed(1);
-                const inf = b.oil >= state.infiniteThreshold ? ' ★' : '';
-                return `${i + 1}. 方块(${b.x * 16}, ${b.z * 16}) 区块(${b.x}, ${b.z}): ${b.oil.toLocaleString()} mB (${lv.label} ${pct}%)${inf}`;
-            });
-            alert('前 20 名：\n\n' + lines.join('\n'));
+        $('baseZ').oninput = () => {
+            state.baseZ = Number($('baseZ').value) || 0;
+            updateStats();
+            updateListPanel();
+            state.offscreenDirty = true;
+            scheduleRender();
         };
+
+        $('refreshInterval').onchange = () => state.useAutoRefresh && startAuto();
 
         $('highlightInfiniteBtn').onclick = () => {
             state.highlightInfinite = !state.highlightInfinite;
@@ -610,8 +1063,12 @@
 
         // ==================== 启动 ====================
         state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
-        state.minOil = Number($('minOil').value) || 0;
-        setStatus('请选择缓存文件');
+        state.useAutoRefresh = false;
+        $('modeSwitch').checked = false;
+        $('modeLabel').textContent = '导入';
+        $('fileLabel').style.display = 'inline';
+        $('intervalLabel').style.display = 'none';
+        setStatus('导入模式 · 请选择缓存文件');
     </script>
 </body>
 

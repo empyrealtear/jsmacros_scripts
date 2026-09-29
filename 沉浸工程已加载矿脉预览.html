@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>IE 矿脉可视化</title>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: #0d1117; color: #c9d1d9; padding: 12px;
+        }
+        h1 { font-size: 16px; margin-bottom: 8px; color: #58a6ff; }
+
+        .toolbar {
+            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+            margin-bottom: 8px; padding: 6px 8px;
+            background: #161b22; border-radius: 6px; font-size: 12px;
+        }
+        .toolbar label { color: #8b949e; }
+        .toolbar input[type="file"] { color: #c9d1d9; font-size: 12px; }
+        .toolbar input[type="text"], .toolbar input[type="number"] {
+            padding: 2px 6px;
+            background: #0d1117; color: #c9d1d9;
+            border: 1px solid #30363d; border-radius: 4px; font-size: 12px;
+        }
+        .toolbar input[type="text"] { width: 140px; }
+        .toolbar input[type="number"] { width: 80px; }
+        .toolbar button {
+            padding: 3px 8px; background: #238636; color: #fff;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .toolbar button:hover { background: #2ea043; }
+        .status { color: #8b949e; margin-left: auto; font-size: 11px; }
+
+        .stats {
+            display: flex; gap: 12px; flex-wrap: wrap;
+            margin-bottom: 8px; font-size: 12px; color: #8b949e;
+        }
+        .stats b { color: #58a6ff; }
+
+        #main {
+            display: flex; gap: 8px; height: 700px;
+        }
+
+        /* 左侧图例 */
+        #legends {
+            width: 190px; flex-shrink: 0;
+            display: flex; flex-direction: column; gap: 8px;
+            overflow-y: auto;
+        }
+        .legend-box {
+            background: #161b22;
+            border: 1px solid #30363d; border-radius: 6px;
+            padding: 8px;
+        }
+        .legend-box h3 {
+            font-size: 12px; color: #58a6ff; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .legend-box h3 button {
+            font-size: 10px; padding: 1px 5px;
+            background: #21262d; color: #8b949e;
+            border: 1px solid #30363d; border-radius: 3px; cursor: pointer;
+        }
+        .legend-item {
+            display: flex; align-items: center; gap: 5px;
+            padding: 3px 5px; margin-bottom: 1px;
+            border-radius: 3px; cursor: pointer;
+            font-size: 12px;
+            border-left: 3px solid transparent;
+            user-select: none;
+        }
+        .legend-item:hover { background: #21262d; }
+        .legend-item.active {
+            background: #1f6feb33;
+            border-left-color: #58a6ff;
+        }
+        .legend-color {
+            width: 12px; height: 12px; border-radius: 2px;
+            flex-shrink: 0;
+        }
+        .legend-item .count {
+            margin-left: auto; color: #6e7681; font-size: 11px;
+        }
+
+        /* 画布 */
+        #canvasWrap {
+            position: relative; flex: 1;
+            background: #161b22;
+            border: 1px solid #30363d; border-radius: 6px;
+            overflow: hidden; cursor: grab;
+        }
+        #canvasWrap.dragging { cursor: grabbing; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+
+        .hud {
+            position: absolute; top: 6px;
+            background: rgba(13, 17, 23, 0.9);
+            border: 1px solid #30363d; border-radius: 4px;
+            padding: 2px 6px; font-size: 11px; color: #8b949e;
+            pointer-events: none;
+        }
+        .hud b { color: #58a6ff; }
+        #coordInfo { left: 6px; }
+        #zoomInfo { right: 6px; }
+
+        #tooltip {
+            position: fixed; pointer-events: none;
+            background: rgba(13, 17, 23, 0.98);
+            border: 1px solid #58a6ff; border-radius: 4px;
+            padding: 5px 8px; font-size: 11px; color: #c9d1d9;
+            white-space: nowrap; display: none; z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 右侧矿脉列表 */
+        #listPanel {
+            width: 240px; flex-shrink: 0;
+            background: #161b22;
+            border: 1px solid #30363d; border-radius: 6px;
+            padding: 8px; overflow-y: auto;
+            font-size: 12px;
+        }
+        #listPanel h3 {
+            font-size: 12px; color: #58a6ff; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; background: #161b22;
+            padding: 2px 0;
+        }
+        #listPanel h3 button {
+            font-size: 10px; padding: 0 4px;
+            background: #21262d; color: #8b949e;
+            border: 1px solid #30363d; border-radius: 2px; cursor: pointer;
+        }
+        .vein-item {
+            padding: 3px 5px; margin-bottom: 2px;
+            border-radius: 3px; cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background 0.1s;
+        }
+        .vein-item:hover { background: #21262d; }
+        .vein-item.active { background: #1f6feb33; border-left-color: #58a6ff; }
+        .vein-item .name { color: #c9d1d9; display: flex; justify-content: space-between; }
+        .vein-item .coord { color: #6e7681; font-size: 11px; display: flex; justify-content: space-between; }
+        .vein-item .dist { color: #58a6ff; }
+    </style>
+</head>
+
+<body>
+
+    <h1>IE 矿脉可视化</h1>
+
+    <div class="toolbar">
+        <label>存档<input type="file" id="fileInput" accept=".dat"></label>
+        <label>基地X<input type="number" id="baseX" value="0" step="16"></label>
+        <label>基地Z<input type="number" id="baseZ" value="0" step="16"></label>
+        <label>关键词<input type="text" id="keyword" placeholder="坐标或矿物名"></label>
+        <button id="resetViewBtn">重置视图</button>
+        <button id="fitViewBtn">适应窗口</button>
+        <button id="goBaseBtn">跳转基地</button>
+        <button id="clearFilterBtn">清除筛选</button>
+        <span class="status" id="status">请选择 ImmersiveEngineering-SaveData.dat</span>
+    </div>
+
+    <div class="stats">
+        <span>总矿脉<b id="totalCount">0</b></span>
+        <span>当前显示<b id="visibleCount">0</b></span>
+        <span>维度<b id="dimList">-</b></span>
+        <span>基地<b id="baseInfo">(0, 0)</b></span>
+    </div>
+
+    <div id="main">
+        <div id="legends">
+            <div class="legend-box">
+                <h3>按储量分类 <button id="clearReserveFilter">全部</button></h3>
+                <div id="reserveLegend"></div>
+            </div>
+            <div class="legend-box">
+                <h3>按矿脉类型 <button id="clearMineralFilter">全部</button></h3>
+                <div id="mineralLegend"></div>
+            </div>
+        </div>
+
+        <div id="canvasWrap">
+            <canvas id="canvas"></canvas>
+            <div class="hud" id="coordInfo">区块 -,-</div>
+            <div class="hud" id="zoomInfo">100%</div>
+        </div>
+
+        <div id="listPanel">
+            <h3>矿脉列表（按距离） <span id="listCount" style="color:#8b949e;font-weight:normal;">0</span></h3>
+            <div id="veinList"></div>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <script>
+        // ==================== 常量 ====================
+        const MAX_YIELD = 38400;
+
+        const RESERVE_LEVELS = [
+            { id: 'full',     label: '满 (100%)',     color: '#238636', min: 0.95, max: 1.01 },
+            { id: 'high',     label: '高 (75-95%)',   color: '#3fb950', min: 0.75, max: 0.95 },
+            { id: 'mid',      label: '中 (50-75%)',   color: '#d29922', min: 0.50, max: 0.75 },
+            { id: 'low',      label: '低 (25-50%)',   color: '#f0883e', min: 0.25, max: 0.50 },
+            { id: 'critical', label: '极低 (1-25%)',  color: '#f85149', min: 0.01, max: 0.25 },
+            { id: 'empty',    label: '已枯竭 (0%)',   color: '#6e7681', min: -1,   max: 0.01 },
+        ];
+
+        const MINERAL_COLORS = [
+            '#58a6ff', '#3fb950', '#d29922', '#f0883e', '#f85149',
+            '#a371f7', '#79c0ff', '#7ee787', '#ffa657', '#ff7b72',
+            '#d2a8ff', '#56d364', '#e3b341', '#ff9a8b', '#bc8cff'
+        ];
+
+        // ==================== NBT 解析器 ====================
+        class NBTReader {
+            constructor(buffer) { this.view = new DataView(buffer); this.pos = 0; }
+            u8() { return this.view.getUint8(this.pos++); }
+            i8() { return this.view.getInt8(this.pos++); }
+            i16() { const v = this.view.getInt16(this.pos); this.pos += 2; return v; }
+            u16() { const v = this.view.getUint16(this.pos); this.pos += 2; return v; }
+            i32() { const v = this.view.getInt32(this.pos); this.pos += 4; return v; }
+            i64() { const v = this.view.getBigInt64(this.pos); this.pos += 8; return v; }
+            f32() { const v = this.view.getFloat32(this.pos); this.pos += 4; return v; }
+            f64() { const v = this.view.getFloat64(this.pos); this.pos += 8; return v; }
+            str() {
+                const len = this.u16();
+                let s = '';
+                for (let i = 0; i < len; i++) s += String.fromCharCode(this.u8());
+                return decodeURIComponent(escape(s));
+            }
+            bytes(n) {
+                const arr = new Uint8Array(this.view.buffer, this.pos, n);
+                this.pos += n;
+                return arr;
+            }
+        }
+
+        const TAG_END = 0, TAG_BYTE = 1, TAG_SHORT = 2, TAG_INT = 3, TAG_LONG = 4;
+        const TAG_FLOAT = 5, TAG_DOUBLE = 6, TAG_BYTE_ARRAY = 7, TAG_STRING = 8;
+        const TAG_LIST = 9, TAG_COMPOUND = 10, TAG_INT_ARRAY = 11, TAG_LONG_ARRAY = 12;
+
+        function readTag(reader, type) {
+            switch (type) {
+                case TAG_BYTE: return reader.i8();
+                case TAG_SHORT: return reader.i16();
+                case TAG_INT: return reader.i32();
+                case TAG_LONG: return reader.i64();
+                case TAG_FLOAT: return reader.f32();
+                case TAG_DOUBLE: return reader.f64();
+                case TAG_BYTE_ARRAY: return Array.from(reader.bytes(reader.i32()));
+                case TAG_STRING: return reader.str();
+                case TAG_LIST: {
+                    const elemType = reader.u8();
+                    const len = reader.i32();
+                    const arr = new Array(len);
+                    for (let i = 0; i < len; i++) arr[i] = readTag(reader, elemType);
+                    return arr;
+                }
+                case TAG_COMPOUND: {
+                    const obj = {};
+                    while (true) {
+                        const tagType = reader.u8();
+                        if (tagType === TAG_END) break;
+                        const name = reader.str();
+                        obj[name] = readTag(reader, tagType);
+                    }
+                    return obj;
+                }
+                case TAG_INT_ARRAY: {
+                    const len = reader.i32();
+                    const arr = new Int32Array(len);
+                    for (let i = 0; i < len; i++) arr[i] = reader.i32();
+                    return arr;
+                }
+                case TAG_LONG_ARRAY: {
+                    const len = reader.i32();
+                    const arr = new Array(len);
+                    for (let i = 0; i < len; i++) arr[i] = reader.i64();
+                    return arr;
+                }
+                default: throw new Error('未知 NBT tag: ' + type);
+            }
+        }
+
+        function parseNBT(buffer) {
+            const reader = new NBTReader(buffer);
+            const rootType = reader.u8();
+            if (rootType !== TAG_COMPOUND) throw new Error('根节点不是 Compound');
+            reader.str();
+            return readTag(reader, TAG_COMPOUND);
+        }
+
+        function parseDatFile(arrayBuffer) {
+            const u8 = new Uint8Array(arrayBuffer);
+            const nbtBytes = (u8[0] === 0x1F && u8[1] === 0x8B) ? pako.ungzip(u8) : u8;
+            return parseNBT(nbtBytes.buffer);
+        }
+
+        function extractVeins(nbt) {
+            const data = nbt.data || nbt;
+            if (!data || !data.mineralVeins) return [];
+            const veins = [];
+            for (const entry of data.mineralVeins) {
+                const dimension = entry.dimension || 'unknown';
+                const veinList = entry.veins || [];
+                for (const v of veinList) {
+                    veins.push({
+                        dimension: String(dimension),
+                        x: Number(v.x) || 0,
+                        z: Number(v.z) || 0,
+                        radius: Number(v.radius) || 0,
+                        depletion: Number(v.depletion) || 0,
+                        mineral: String(v.mineral || ''),
+                        reserve: Math.max(0, 1 - (Number(v.depletion) || 0) / MAX_YIELD),
+                    });
+                }
+            }
+            return veins;
+        }
+
+        // ==================== 状态 ====================
+        const state = {
+            veins: [],
+            visible: [],
+            dimBounds: {},
+            currentDim: null,
+            zoom: 1.0,
+            panX: 0,
+            panY: 0,
+            _scale: 1.0,
+            reserveFilter: new Set(),
+            mineralFilter: new Set(),
+            keyword: '',
+            baseX: 0,
+            baseZ: 0,
+            selectedVein: null,
+            offscreen: null,
+            offscreenW: 0,
+            offscreenH: 0,
+            offscreenDirty: true,
+            offscreenKey: '',
+            reserveCounts: {},
+            mineralCounts: {},
+        };
+
+        // ==================== DOM ====================
+        const $ = id => document.getElementById(id);
+        const canvas = $('canvas');
+        const ctx = canvas.getContext('2d');
+        const wrap = $('canvasWrap');
+        const tooltip = $('tooltip');
+        const coordInfo = $('coordInfo');
+        const zoomInfo = $('zoomInfo');
+        const veinList = $('veinList');
+        const reserveLegend = $('reserveLegend');
+        const mineralLegend = $('mineralLegend');
+
+        // ==================== 工具 ====================
+        function setStatus(msg, isError = false) {
+            const el = $('status');
+            el.textContent = msg;
+            el.style.color = isError ? '#f85149' : '#8b949e';
+        }
+
+        function mineralColor(id) {
+            let hash = 0;
+            for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+            return MINERAL_COLORS[hash % MINERAL_COLORS.length];
+        }
+
+        function mineralLabel(id) {
+            if (!id) return '未知';
+            return id.split('/').pop().replace(/_/g, ' ');
+        }
+
+        function getReserveLevel(vein) {
+            for (const lv of RESERVE_LEVELS) {
+                if (vein.reserve >= lv.min && vein.reserve < lv.max) return lv;
+            }
+            return RESERVE_LEVELS[RESERVE_LEVELS.length - 1];
+        }
+
+        function distanceToBase(vein) {
+            const dx = vein.x - state.baseX;
+            const dz = vein.z - state.baseZ;
+            return Math.sqrt(dx * dx + dz * dz);
+        }
+
+        // ==================== 坐标转换 ====================
+        function screenToWorld(screenX, screenY) {
+            const bounds = state.dimBounds[state.currentDim];
+            const scale = state._scale;
+            return {
+                x: (screenX - state.panX) / scale + bounds.minX,
+                z: (screenY - state.panY) / scale + bounds.minZ,
+            };
+        }
+
+        // ==================== 离屏画布尺寸 ====================
+        function getOffscreenSize() {
+            return {
+                w: Math.max(1, Math.ceil(wrap.clientWidth)),
+                h: Math.max(1, Math.ceil(wrap.clientHeight)),
+            };
+        }
+
+        // ==================== 渲染调度 ====================
+        let renderPending = false;
+        function scheduleRender() {
+            if (renderPending) return;
+            renderPending = true;
+            requestAnimationFrame(() => {
+                renderPending = false;
+                render();
+            });
+        }
+
+        // ==================== 离屏画布 ====================
+        function renderOffscreen() {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const off = getOffscreenSize();
+
+            const cacheKey = [
+                state.currentDim,
+                off.w, off.h,
+                state._scale.toFixed(6),
+                state.panX.toFixed(2),
+                state.panY.toFixed(2),
+                Array.from(state.reserveFilter).sort().join(','),
+                Array.from(state.mineralFilter).sort().join(','),
+                state.keyword,
+                state.baseX, state.baseZ,
+                state.selectedVein ? veinKey(state.selectedVein) : '',
+            ].join('|');
+
+            if (state.offscreen && !state.offscreenDirty && state.offscreenKey === cacheKey) {
+                return;
+            }
+
+            if (!state.offscreen || state.offscreenW !== off.w || state.offscreenH !== off.h) {
+                state.offscreen = document.createElement('canvas');
+                state.offscreen.width = off.w;
+                state.offscreen.height = off.h;
+                state.offscreenW = off.w;
+                state.offscreenH = off.h;
+            }
+
+            const octx = state.offscreen.getContext('2d');
+            octx.fillStyle = '#0d1117';
+            octx.fillRect(0, 0, off.w, off.h);
+
+            const scale = state._scale;
+            const viewLeft = -state.panX / scale + bounds.minX;
+            const viewTop = -state.panY / scale + bounds.minZ;
+            const viewRight = (off.w - state.panX) / scale + bounds.minX;
+            const viewBottom = (off.h - state.panY) / scale + bounds.minZ;
+
+            const toScreenX = (wx) => (wx - bounds.minX) * scale + state.panX;
+            const toScreenY = (wz) => (wz - bounds.minZ) * scale + state.panY;
+
+            const viewPad = 200 / scale;
+            const minRadiusPx = 2;
+
+            for (let i = 0; i < state.visible.length; i++) {
+                const v = state.visible[i];
+                if (v.dimension !== state.currentDim) continue;
+                if (v.x + v.radius < viewLeft - viewPad) continue;
+                if (v.x - v.radius > viewRight + viewPad) continue;
+                if (v.z + v.radius < viewTop - viewPad) continue;
+                if (v.z - v.radius > viewBottom + viewPad) continue;
+
+                const px = toScreenX(v.x);
+                const py = toScreenY(v.z);
+                const pr = Math.max(minRadiusPx, v.radius * scale);
+                const color = mineralColor(v.mineral);
+
+                octx.globalAlpha = 0.25;
+                octx.fillStyle = color;
+                octx.beginPath();
+                octx.arc(px, py, pr, 0, Math.PI * 2);
+                octx.fill();
+
+                octx.globalAlpha = 1.0;
+                octx.strokeStyle = color;
+                octx.lineWidth = Math.max(1, pr * 0.1);
+                octx.beginPath();
+                octx.arc(px, py, pr, 0, Math.PI * 2);
+                octx.stroke();
+            }
+
+            // 基地标记
+            const bx = toScreenX(state.baseX);
+            const by = toScreenY(state.baseZ);
+            if (bx > -20 && bx < off.w + 20 && by > -20 && by < off.h + 20) {
+                octx.save();
+                octx.shadowColor = '#f0f6fc';
+                octx.shadowBlur = 8;
+                octx.strokeStyle = '#f0f6fc';
+                octx.lineWidth = 2;
+                const s = 8;
+                octx.beginPath();
+                octx.moveTo(bx - s, by);
+                octx.lineTo(bx + s, by);
+                octx.moveTo(bx, by - s);
+                octx.lineTo(bx, by + s);
+                octx.stroke();
+                octx.beginPath();
+                octx.arc(bx, by, 4, 0, Math.PI * 2);
+                octx.stroke();
+                octx.restore();
+            }
+
+            // 高亮选中
+            if (state.selectedVein && state.selectedVein.dimension === state.currentDim) {
+                const v = state.selectedVein;
+                const px = toScreenX(v.x);
+                const py = toScreenY(v.z);
+                const pr = Math.max(2, v.radius * scale);
+                octx.save();
+                octx.shadowColor = '#58a6ff';
+                octx.shadowBlur = 12;
+                octx.strokeStyle = '#58a6ff';
+                octx.lineWidth = Math.max(3, pr * 0.15);
+                octx.beginPath();
+                octx.arc(px, py, pr, 0, Math.PI * 2);
+                octx.stroke();
+                octx.restore();
+            }
+
+            state.offscreenDirty = false;
+            state.offscreenKey = cacheKey;
+        }
+
+        // ==================== 渲染 ====================
+        function render() {
+            if (!state.currentDim) return;
+
+            renderOffscreen();
+
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            if (canvas.width !== cw || canvas.height !== ch) {
+                canvas.width = cw;
+                canvas.height = ch;
+                canvas.style.width = cw + 'px';
+                canvas.style.height = ch + 'px';
+            }
+
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, cw, ch);
+
+            if (state.offscreen) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(state.offscreen, 0, 0, state.offscreenW, state.offscreenH, 0, 0, cw, ch);
+            }
+
+            const pxPerChunk = state._scale;
+            const worldW = cw / pxPerChunk;
+            const worldH = ch / pxPerChunk;
+            zoomInfo.textContent = `${pxPerChunk.toFixed(2)} px/区块 · 视口 ${Math.round(worldW)}×${Math.round(worldH)}`;
+        }
+
+        // ==================== 视图控制 ====================
+        function computeBestScale() {
+            const bounds = state.dimBounds[state.currentDim];
+            const worldW = bounds.maxX - bounds.minX + 1;
+            const worldH = bounds.maxZ - bounds.minZ + 1;
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+
+            const fitScale = Math.min(cw / worldW, ch / worldH);
+            const minScale = 3 / 25;
+            const scale = Math.max(fitScale, minScale);
+            return Math.min(scale, 10);
+        }
+
+        function resetView() {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const worldW = bounds.maxX - bounds.minX + 1;
+            const worldH = bounds.maxZ - bounds.minZ + 1;
+
+            state._scale = computeBestScale();
+            state.zoom = state._scale;
+
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            const scaledW = worldW * state._scale;
+            const scaledH = worldH * state._scale;
+            state.panX = (cw - scaledW) / 2;
+            state.panY = (ch - scaledH) / 2;
+
+            state.offscreenDirty = true;
+            scheduleRender();
+        }
+
+        function fitView() {
+            resetView();
+        }
+
+        /** 跳转到指定世界坐标（保持当前缩放） */
+        function goToWorld(wx, wz) {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const cw = wrap.clientWidth;
+            const ch = wrap.clientHeight;
+            state.panX = cw / 2 - (wx - bounds.minX) * state._scale;
+            state.panY = ch / 2 - (wz - bounds.minZ) * state._scale;
+            state.offscreenDirty = true;
+            scheduleRender();
+        }
+
+        /** 跳转基地 */
+        function goToBase() {
+            goToWorld(state.baseX, state.baseZ);
+        }
+
+        // ==================== 缩放/平移 ====================
+        wrap.addEventListener('wheel', e => {
+            if (!state.currentDim) return;
+            e.preventDefault();
+            const rect = wrap.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            const oldScale = state._scale;
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            state._scale = Math.max(0.001, Math.min(50, state._scale * factor));
+            state.zoom = state._scale;
+
+            state.panX = mx - (mx - state.panX) * (state._scale / oldScale);
+            state.panY = my - (my - state.panY) * (state._scale / oldScale);
+
+            state.offscreenDirty = true;
+            scheduleRender();
+        }, { passive: false });
+
+        let dragging = false, dsx = 0, dsy = 0, dspx = 0, dspy = 0;
+        wrap.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            dragging = true;
+            wrap.classList.add('dragging');
+            dsx = e.clientX; dsy = e.clientY;
+            dspx = state.panX; dspy = state.panY;
+        });
+        window.addEventListener('mousemove', e => {
+            if (!dragging) return;
+            state.panX = dspx + (e.clientX - dsx);
+            state.panY = dspy + (e.clientY - dsy);
+            state.offscreenDirty = true;
+            scheduleRender();
+        });
+        window.addEventListener('mouseup', () => {
+            if (dragging) { dragging = false; wrap.classList.remove('dragging'); }
+        });
+
+        // ==================== 悬停 ====================
+        canvas.addEventListener('mousemove', e => {
+            if (dragging) return;
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const wp = screenToWorld(sx, sy);
+
+            coordInfo.innerHTML = `区块 <b>${Math.floor(wp.x)}</b>,<b>${Math.floor(wp.z)}</b>`;
+
+            let found = null;
+            for (let i = state.visible.length - 1; i >= 0; i--) {
+                const v = state.visible[i];
+                if (v.dimension !== state.currentDim) continue;
+                const dx = wp.x - v.x, dz = wp.z - v.z;
+                if (dx * dx + dz * dz <= v.radius * v.radius) { found = v; break; }
+            }
+
+            if (found) {
+                tooltip.style.display = 'block';
+                const tw = 260, th = 130, pad = 15;
+                let left = e.clientX + pad, top = e.clientY + pad;
+                if (left + tw > window.innerWidth) left = e.clientX - tw - pad;
+                if (top + th > window.innerHeight) top = e.clientY - th - pad;
+                if (left < 0) left = pad;
+                if (top < 0) top = pad;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+
+                const level = getReserveLevel(found);
+                const color = mineralColor(found.mineral);
+                const dist = distanceToBase(found);
+                tooltip.innerHTML =
+                    `<b style="color:${color}">${mineralLabel(found.mineral)}</b><br>` +
+                    `区块 (${found.x}, ${found.z})<br>` +
+                    `半径：${found.radius}<br>` +
+                    `已开采：${found.depletion.toLocaleString()}<br>` +
+                    `剩余：<b style="color:${level.color}">${(found.reserve * 100).toFixed(1)}% (${level.label})</b><br>` +
+                    `距基地：<b style="color:#58a6ff">${dist.toFixed(0)} 区块</b>`;
+            } else {
+                tooltip.style.display = 'none';
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+            coordInfo.innerHTML = '区块 -,-';
+        });
+
+        // ==================== 点击选中 ====================
+        canvas.addEventListener('click', e => {
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            const wp = screenToWorld(sx, sy);
+
+            for (let i = state.visible.length - 1; i >= 0; i--) {
+                const v = state.visible[i];
+                if (v.dimension !== state.currentDim) continue;
+                const dx = wp.x - v.x, dz = wp.z - v.z;
+                if (dx * dx + dz * dz <= v.radius * v.radius) {
+                    selectVein(v, false);
+                    return;
+                }
+            }
+            state.selectedVein = null;
+            updateListPanel();
+            state.offscreenDirty = true;
+            scheduleRender();
+        });
+
+        // ==================== 选中 + 跳转 ====================
+        /**
+         * @param {object} vein
+         * @param {boolean} centerView - 是否跳转视图
+         */
+        function selectVein(vein, centerView = true) {
+            state.selectedVein = vein;
+            if (centerView) {
+                // 只移动视图，不改变缩放
+                goToWorld(vein.x, vein.z);
+            }
+            state.offscreenDirty = true;
+            scheduleRender();
+            updateListPanel();
+            const el = document.querySelector(`.vein-item[data-key="${veinKey(vein)}"]`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function veinKey(v) {
+            return `${v.dimension}|${v.x}|${v.z}|${v.mineral}`;
+        }
+
+        // ==================== 列表 ====================
+        function updateListPanel() {
+            if (!state.currentDim) return;
+            const visible = state.visible.filter(v => v.dimension === state.currentDim);
+
+            // 按距离基地排序
+            visible.sort((a, b) => distanceToBase(a) - distanceToBase(b));
+
+            document.getElementById('listCount').textContent = visible.length;
+
+            if (visible.length === 0) {
+                veinList.innerHTML = '<div style="color:#8b949e;padding:6px;">无匹配矿脉</div>';
+                return;
+            }
+
+            let html = '';
+            for (let i = 0; i < Math.min(visible.length, 300); i++) {
+                const v = visible[i];
+                const key = veinKey(v);
+                const isSelected = state.selectedVein && veinKey(state.selectedVein) === key;
+                const level = getReserveLevel(v);
+                const color = mineralColor(v.mineral);
+                const dist = distanceToBase(v);
+                html += `<div class="vein-item${isSelected ? ' active' : ''}" data-key="${key}">
+                    <div class="name">
+                        <span><span style="color:${color}">■</span> ${mineralLabel(v.mineral)}</span>
+                        <span class="dist">${dist.toFixed(0)}</span>
+                    </div>
+                    <div class="coord">
+                        <span>(${v.x}, ${v.z})</span>
+                        <span style="color:${level.color}">${(v.reserve * 100).toFixed(0)}%</span>
+                    </div>
+                </div>`;
+            }
+            if (visible.length > 300) {
+                html += `<div style="color:#8b949e;padding:4px;">...还有 ${visible.length - 300} 条</div>`;
+            }
+            veinList.innerHTML = html;
+
+            veinList.querySelectorAll('.vein-item').forEach(el => {
+                el.onclick = () => {
+                    const key = el.dataset.key;
+                    const v = visible.find(x => veinKey(x) === key);
+                    if (v) selectVein(v, true);
+                };
+            });
+        }
+
+        // ==================== 图例 ====================
+        function buildLegends() {
+            reserveLegend.innerHTML = '';
+            for (const lv of RESERVE_LEVELS) {
+                const count = state.reserveCounts[lv.id] || 0;
+                const el = document.createElement('div');
+                el.className = 'legend-item' + (state.reserveFilter.has(lv.id) ? ' active' : '');
+                el.dataset.id = lv.id;
+                el.innerHTML = `<span class="legend-color" style="background:${lv.color}"></span>
+                    <span>${lv.label}</span><span class="count">${count}</span>`;
+                el.onclick = () => toggleReserveFilter(lv.id);
+                reserveLegend.appendChild(el);
+            }
+
+            mineralLegend.innerHTML = '';
+            const sortedMinerals = Object.entries(state.mineralCounts).sort((a, b) => b[1] - a[1]);
+            for (const [id, count] of sortedMinerals) {
+                const color = mineralColor(id);
+                const el = document.createElement('div');
+                el.className = 'legend-item' + (state.mineralFilter.has(id) ? ' active' : '');
+                el.dataset.id = id;
+                el.innerHTML = `<span class="legend-color" style="background:${color}"></span>
+                    <span>${mineralLabel(id)}</span><span class="count">${count}</span>`;
+                el.onclick = () => toggleMineralFilter(id);
+                mineralLegend.appendChild(el);
+            }
+        }
+
+        function toggleReserveFilter(id) {
+            if (state.reserveFilter.has(id)) state.reserveFilter.delete(id);
+            else state.reserveFilter.add(id);
+            applyFilter();
+            buildLegends();
+        }
+
+        function toggleMineralFilter(id) {
+            if (state.mineralFilter.has(id)) state.mineralFilter.delete(id);
+            else state.mineralFilter.add(id);
+            applyFilter();
+            buildLegends();
+        }
+
+        // ==================== 统计 ====================
+        function updateStats() {
+            const dims = [...new Set(state.veins.map(v => v.dimension))];
+            $('totalCount').textContent = state.veins.length.toLocaleString();
+            $('visibleCount').textContent = state.visible.length.toLocaleString();
+            $('dimList').textContent = dims.join(', ') || '-';
+            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
+        }
+
+        // ==================== 过滤 ====================
+        function applyFilter() {
+            const kw = state.keyword.toLowerCase().trim();
+            const hasReserve = state.reserveFilter.size > 0;
+            const hasMineral = state.mineralFilter.size > 0;
+
+            const visible = [];
+            for (let i = 0; i < state.veins.length; i++) {
+                const v = state.veins[i];
+                if (hasReserve) {
+                    const level = getReserveLevel(v);
+                    if (!state.reserveFilter.has(level.id)) continue;
+                }
+                if (hasMineral && !state.mineralFilter.has(v.mineral)) continue;
+                if (kw) {
+                    const s = `${v.mineral} ${v.x} ${v.z} ${v.x * 16} ${v.z * 16}`.toLowerCase();
+                    if (!s.includes(kw)) continue;
+                }
+                visible.push(v);
+            }
+
+            state.visible = visible;
+            state.offscreenDirty = true;
+            scheduleRender();
+            updateStats();
+            updateListPanel();
+        }
+
+        // ==================== 加载文件 ====================
+        function loadFromFile(file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const t0 = performance.now();
+                    const nbt = parseDatFile(ev.target.result);
+                    const veins = extractVeins(nbt);
+                    const t1 = performance.now();
+
+                    if (veins.length === 0) {
+                        setStatus('未找到矿脉数据', true);
+                        return;
+                    }
+
+                    state.veins = veins;
+                    state.visible = veins;
+                    state.reserveCounts = {};
+                    state.mineralCounts = {};
+                    state.dimBounds = {};
+
+                    for (let i = 0; i < veins.length; i++) {
+                        const v = veins[i];
+                        const level = getReserveLevel(v);
+                        state.reserveCounts[level.id] = (state.reserveCounts[level.id] || 0) + 1;
+                        state.mineralCounts[v.mineral] = (state.mineralCounts[v.mineral] || 0) + 1;
+
+                        if (!state.dimBounds[v.dimension]) {
+                            state.dimBounds[v.dimension] = {
+                                minX: v.x - v.radius, maxX: v.x + v.radius,
+                                minZ: v.z - v.radius, maxZ: v.z + v.radius
+                            };
+                        } else {
+                            const b = state.dimBounds[v.dimension];
+                            if (v.x - v.radius < b.minX) b.minX = v.x - v.radius;
+                            if (v.x + v.radius > b.maxX) b.maxX = v.x + v.radius;
+                            if (v.z - v.radius < b.minZ) b.minZ = v.z - v.radius;
+                            if (v.z + v.radius > b.maxZ) b.maxZ = v.z + v.radius;
+                        }
+                    }
+
+                    const dims = Object.keys(state.dimBounds);
+                    if (dims.length === 0) { setStatus('数据为空', true); return; }
+                    state.currentDim = dims[0];
+
+                    resetView();
+                    updateStats();
+                    buildLegends();
+                    updateListPanel();
+
+                    const t2 = performance.now();
+                    setStatus(`已加载 ${veins.length} 条 · 解析 ${(t1 - t0).toFixed(0)}ms · 渲染 ${(t2 - t1).toFixed(0)}ms`);
+                } catch (err) {
+                    setStatus(`解析失败：${err.message}`, true);
+                    console.error(err);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ==================== 事件 ====================
+        $('fileInput').onchange = e => {
+            const file = e.target.files[0];
+            if (file) loadFromFile(file);
+        };
+
+        $('resetViewBtn').onclick = resetView;
+        $('fitViewBtn').onclick = fitView;
+        $('goBaseBtn').onclick = goToBase;
+
+        $('clearFilterBtn').onclick = () => {
+            state.reserveFilter.clear();
+            state.mineralFilter.clear();
+            state.keyword = '';
+            $('keyword').value = '';
+            applyFilter();
+            buildLegends();
+        };
+
+        $('clearReserveFilter').onclick = () => {
+            state.reserveFilter.clear();
+            applyFilter();
+            buildLegends();
+        };
+
+        $('clearMineralFilter').onclick = () => {
+            state.mineralFilter.clear();
+            applyFilter();
+            buildLegends();
+        };
+
+        $('keyword').oninput = () => {
+            state.keyword = $('keyword').value;
+            applyFilter();
+        };
+
+        $('baseX').oninput = () => {
+            state.baseX = Number($('baseX').value) || 0;
+            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
+            state.offscreenDirty = true;
+            updateListPanel();
+            scheduleRender();
+        };
+
+        $('baseZ').oninput = () => {
+            state.baseZ = Number($('baseZ').value) || 0;
+            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
+            state.offscreenDirty = true;
+            updateListPanel();
+            scheduleRender();
+        };
+
+        // ==================== 启动 ====================
+        setStatus('请选择 ImmersiveEngineering-SaveData.dat');
+    </script>
+</body>
+
+</html>

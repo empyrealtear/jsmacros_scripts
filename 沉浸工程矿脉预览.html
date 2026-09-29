@@ -24,8 +24,8 @@
             background: #0d1117; color: #c9d1d9;
             border: 1px solid #30363d; border-radius: 4px; font-size: 12px;
         }
-        .toolbar input[type="text"] { width: 140px; }
-        .toolbar input[type="number"] { width: 80px; }
+        .toolbar input[type="text"] { width: 130px; }
+        .toolbar input[type="number"] { width: 90px; }
         .toolbar button {
             padding: 3px 8px; background: #238636; color: #fff;
             border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
@@ -125,11 +125,6 @@
             position: sticky; top: 0; background: #161b22;
             padding: 2px 0;
         }
-        #listPanel h3 button {
-            font-size: 10px; padding: 0 4px;
-            background: #21262d; color: #8b949e;
-            border: 1px solid #30363d; border-radius: 2px; cursor: pointer;
-        }
         .vein-item {
             padding: 3px 5px; margin-bottom: 2px;
             border-radius: 3px; cursor: pointer;
@@ -141,6 +136,7 @@
         .vein-item .name { color: #c9d1d9; display: flex; justify-content: space-between; }
         .vein-item .coord { color: #6e7681; font-size: 11px; display: flex; justify-content: space-between; }
         .vein-item .dist { color: #58a6ff; }
+        .vein-item .oil { color: #d29922; font-size: 11px; }
     </style>
 </head>
 
@@ -152,6 +148,7 @@
         <label>存档<input type="file" id="fileInput" accept=".dat"></label>
         <label>基地X<input type="number" id="baseX" value="0" step="16"></label>
         <label>基地Z<input type="number" id="baseZ" value="0" step="16"></label>
+        <label>总矿量<input type="number" id="maxYield" value="784000" step="1024"></label>
         <label>关键词<input type="text" id="keyword" placeholder="坐标或矿物名"></label>
         <button id="resetViewBtn">重置视图</button>
         <button id="fitViewBtn">适应窗口</button>
@@ -181,7 +178,7 @@
 
         <div id="canvasWrap">
             <canvas id="canvas"></canvas>
-            <div class="hud" id="coordInfo">区块 -,-</div>
+            <div class="hud" id="coordInfo">方块 -,-</div>
             <div class="hud" id="zoomInfo">100%</div>
         </div>
 
@@ -195,7 +192,7 @@
 
     <script>
         // ==================== 常量 ====================
-        const MAX_YIELD = 38400;
+        // MAX_YIELD 现在是动态的，从输入框读取
 
         const RESERVE_LEVELS = [
             { id: 'full',     label: '满 (100%)',     color: '#238636', min: 0.95, max: 1.01 },
@@ -291,13 +288,6 @@
             return readTag(reader, TAG_COMPOUND);
         }
 
-        // ==================== 原生 gzip 解压 ====================
-        /**
-         * 用浏览器原生 DecompressionStream 解压 gzip
-         * 兼容：Chrome 80+ / Firefox 113+ / Safari 16.4+
-         * @param {Uint8Array} u8 gzip 压缩的字节数组
-         * @returns {Promise<Uint8Array>} 解压后的字节数组
-         */
         async function ungzipNative(u8) {
             const ds = new DecompressionStream('gzip');
             const stream = new Blob([u8]).stream().pipeThrough(ds);
@@ -305,14 +295,8 @@
             return new Uint8Array(buffer);
         }
 
-        /**
-         * 解析 .dat 文件（自动判断是否 gzip 压缩）
-         * @param {ArrayBuffer} arrayBuffer
-         * @returns {Promise<object>} NBT 对象
-         */
         async function parseDatFile(arrayBuffer) {
             const u8 = new Uint8Array(arrayBuffer);
-            // gzip magic: 0x1F 0x8B
             const nbtBytes = (u8[0] === 0x1F && u8[1] === 0x8B)
                 ? await ungzipNative(u8)
                 : u8;
@@ -334,7 +318,6 @@
                         radius: Number(v.radius) || 0,
                         depletion: Number(v.depletion) || 0,
                         mineral: String(v.mineral || ''),
-                        reserve: Math.max(0, 1 - (Number(v.depletion) || 0) / MAX_YIELD),
                     });
                 }
             }
@@ -356,6 +339,7 @@
             keyword: '',
             baseX: 0,
             baseZ: 0,
+            maxYield: 784000,
             selectedVein: null,
             offscreen: null,
             offscreenW: 0,
@@ -396,9 +380,20 @@
             return id.split('/').pop().replace(/_/g, ' ');
         }
 
+        /** 计算剩余率 */
+        function getReserve(vein) {
+            return Math.max(0, 1 - vein.depletion / state.maxYield);
+        }
+
+        /** 计算剩余矿量 */
+        function getRemaining(vein) {
+            return Math.max(0, state.maxYield - vein.depletion);
+        }
+
         function getReserveLevel(vein) {
+            const r = getReserve(vein);
             for (const lv of RESERVE_LEVELS) {
-                if (vein.reserve >= lv.min && vein.reserve < lv.max) return lv;
+                if (r >= lv.min && r < lv.max) return lv;
             }
             return RESERVE_LEVELS[RESERVE_LEVELS.length - 1];
         }
@@ -407,6 +402,10 @@
             const dx = vein.x - state.baseX;
             const dz = vein.z - state.baseZ;
             return Math.sqrt(dx * dx + dz * dz);
+        }
+
+        function formatNumber(n) {
+            return n.toLocaleString();
         }
 
         // ==================== 坐标转换 ====================
@@ -419,7 +418,6 @@
             };
         }
 
-        // ==================== 离屏画布尺寸 ====================
         function getOffscreenSize() {
             return {
                 w: Math.max(1, Math.ceil(wrap.clientWidth)),
@@ -454,6 +452,7 @@
                 Array.from(state.mineralFilter).sort().join(','),
                 state.keyword,
                 state.baseX, state.baseZ,
+                state.maxYield,
                 state.selectedVein ? veinKey(state.selectedVein) : '',
             ].join('|');
 
@@ -581,7 +580,7 @@
             const pxPerChunk = state._scale;
             const worldW = cw / pxPerChunk;
             const worldH = ch / pxPerChunk;
-            zoomInfo.textContent = `${pxPerChunk.toFixed(2)} px/区块 · 视口 ${Math.round(worldW)}×${Math.round(worldH)}`;
+            zoomInfo.textContent = `${pxPerChunk.toFixed(2)} px/方块 · 视口 ${Math.round(worldW)}×${Math.round(worldH)}`;
         }
 
         // ==================== 视图控制 ====================
@@ -684,7 +683,7 @@
             const sy = e.clientY - rect.top;
             const wp = screenToWorld(sx, sy);
 
-            coordInfo.innerHTML = `区块 <b>${Math.floor(wp.x)}</b>,<b>${Math.floor(wp.z)}</b>`;
+            coordInfo.innerHTML = `方块 <b>${Math.floor(wp.x)}</b>,<b>${Math.floor(wp.z)}</b>`;
 
             let found = null;
             for (let i = state.visible.length - 1; i >= 0; i--) {
@@ -696,7 +695,7 @@
 
             if (found) {
                 tooltip.style.display = 'block';
-                const tw = 260, th = 130, pad = 15;
+                const tw = 280, th = 160, pad = 15;
                 let left = e.clientX + pad, top = e.clientY + pad;
                 if (left + tw > window.innerWidth) left = e.clientX - tw - pad;
                 if (top + th > window.innerHeight) top = e.clientY - th - pad;
@@ -708,13 +707,16 @@
                 const level = getReserveLevel(found);
                 const color = mineralColor(found.mineral);
                 const dist = distanceToBase(found);
+                const remaining = getRemaining(found);
+                const reservePct = getReserve(found) * 100;
                 tooltip.innerHTML =
                     `<b style="color:${color}">${mineralLabel(found.mineral)}</b><br>` +
-                    `区块 (${found.x}, ${found.z})<br>` +
+                    `方块 (${found.x}, ${found.z})<br>` +
                     `半径：${found.radius}<br>` +
-                    `已开采：${found.depletion.toLocaleString()}<br>` +
-                    `剩余：<b style="color:${level.color}">${(found.reserve * 100).toFixed(1)}% (${level.label})</b><br>` +
-                    `距基地：<b style="color:#58a6ff">${dist.toFixed(0)} 区块</b>`;
+                    `已开采：${formatNumber(found.depletion)}<br>` +
+                    `剩余矿量：<b style="color:#d29922">${formatNumber(remaining)}</b><br>` +
+                    `剩余率：<b style="color:${level.color}">${reservePct.toFixed(1)}% (${level.label})</b><br>` +
+                    `距基地：<b style="color:#58a6ff">${dist.toFixed(0)} 方块</b>`;
             } else {
                 tooltip.style.display = 'none';
             }
@@ -722,7 +724,7 @@
 
         canvas.addEventListener('mouseleave', () => {
             tooltip.style.display = 'none';
-            coordInfo.innerHTML = '区块 -,-';
+            coordInfo.innerHTML = '方块 -,-';
         });
 
         // ==================== 点击选中 ====================
@@ -783,6 +785,8 @@
                 const level = getReserveLevel(v);
                 const color = mineralColor(v.mineral);
                 const dist = distanceToBase(v);
+                const remaining = getRemaining(v);
+                const reservePct = getReserve(v) * 100;
                 html += `<div class="vein-item${isSelected ? ' active' : ''}" data-key="${key}">
                     <div class="name">
                         <span><span style="color:${color}">■</span> ${mineralLabel(v.mineral)}</span>
@@ -790,8 +794,9 @@
                     </div>
                     <div class="coord">
                         <span>(${v.x}, ${v.z})</span>
-                        <span style="color:${level.color}">${(v.reserve * 100).toFixed(0)}%</span>
+                        <span style="color:${level.color}">${reservePct.toFixed(0)}%</span>
                     </div>
+                    <div class="oil">剩余 ${formatNumber(remaining)}</div>
                 </div>`;
             }
             if (visible.length > 300) {
@@ -859,6 +864,18 @@
             $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
         }
 
+        // ==================== 重新计算统计 ====================
+        function recalcStats() {
+            state.reserveCounts = {};
+            state.mineralCounts = {};
+            for (let i = 0; i < state.veins.length; i++) {
+                const v = state.veins[i];
+                const level = getReserveLevel(v);
+                state.reserveCounts[level.id] = (state.reserveCounts[level.id] || 0) + 1;
+                state.mineralCounts[v.mineral] = (state.mineralCounts[v.mineral] || 0) + 1;
+            }
+        }
+
         // ==================== 过滤 ====================
         function applyFilter() {
             const kw = state.keyword.toLowerCase().trim();
@@ -904,16 +921,10 @@
 
                     state.veins = veins;
                     state.visible = veins;
-                    state.reserveCounts = {};
-                    state.mineralCounts = {};
                     state.dimBounds = {};
 
                     for (let i = 0; i < veins.length; i++) {
                         const v = veins[i];
-                        const level = getReserveLevel(v);
-                        state.reserveCounts[level.id] = (state.reserveCounts[level.id] || 0) + 1;
-                        state.mineralCounts[v.mineral] = (state.mineralCounts[v.mineral] || 0) + 1;
-
                         if (!state.dimBounds[v.dimension]) {
                             state.dimBounds[v.dimension] = {
                                 minX: v.x - v.radius, maxX: v.x + v.radius,
@@ -932,6 +943,7 @@
                     if (dims.length === 0) { setStatus('数据为空', true); return; }
                     state.currentDim = dims[0];
 
+                    recalcStats();
                     resetView();
                     updateStats();
                     buildLegends();
@@ -997,6 +1009,18 @@
             state.offscreenDirty = true;
             updateListPanel();
             scheduleRender();
+        };
+
+        $('maxYield').oninput = () => {
+            const v = Number($('maxYield').value);
+            if (v > 0) {
+                state.maxYield = v;
+                recalcStats();
+                buildLegends();
+                updateListPanel();
+                state.offscreenDirty = true;
+                scheduleRender();
+            }
         };
 
         // ==================== 启动 ====================

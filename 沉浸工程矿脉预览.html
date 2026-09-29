@@ -8,135 +8,150 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-            background: #0d1117; color: #c9d1d9; padding: 12px;
+            background: #1a1d21; color: #d4d8dd; padding: 12px;
         }
-        h1 { font-size: 16px; margin-bottom: 8px; color: #58a6ff; }
+        h1 { font-size: 16px; margin-bottom: 8px; color: #8ab4f8; }
 
         .toolbar {
             display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
             margin-bottom: 8px; padding: 6px 8px;
-            background: #161b22; border-radius: 6px; font-size: 12px;
+            background: #25292e; border-radius: 6px; font-size: 12px;
         }
-        .toolbar label { color: #8b949e; }
-        .toolbar input[type="file"] { color: #c9d1d9; font-size: 12px; }
+        .toolbar label { color: #9aa0a6; }
+        .toolbar input[type="file"] { color: #d4d8dd; font-size: 12px; }
         .toolbar input[type="text"], .toolbar input[type="number"] {
-            padding: 2px 6px;
-            background: #0d1117; color: #c9d1d9;
-            border: 1px solid #30363d; border-radius: 4px; font-size: 12px;
+            padding: 3px 6px;
+            background: #1a1d21; color: #d4d8dd;
+            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
         }
         .toolbar input[type="text"] { width: 130px; }
         .toolbar input[type="number"] { width: 90px; }
-        .toolbar button {
-            padding: 3px 8px; background: #238636; color: #fff;
-            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+        .toolbar select {
+            padding: 3px 6px;
+            background: #1a1d21; color: #d4d8dd;
+            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
+            max-width: 220px;
         }
-        .toolbar button:hover { background: #2ea043; }
-        .status { color: #8b949e; margin-left: auto; font-size: 11px; }
+        .toolbar button {
+            padding: 4px 10px; background: #3d6b4d; color: #e8eaed;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+            transition: background 0.15s;
+        }
+        .toolbar button:hover { background: #4d7c5d; }
+        .status { color: #9aa0a6; margin-left: auto; font-size: 11px; }
 
         .stats {
             display: flex; gap: 12px; flex-wrap: wrap;
-            margin-bottom: 8px; font-size: 12px; color: #8b949e;
+            margin-bottom: 8px; font-size: 12px; color: #9aa0a6;
         }
-        .stats b { color: #58a6ff; }
+        .stats b { color: #8ab4f8; }
 
         #main {
             display: flex; gap: 8px; height: 700px;
         }
 
         #legends {
-            width: 190px; flex-shrink: 0;
+            width: 200px; flex-shrink: 0;
             display: flex; flex-direction: column; gap: 8px;
             overflow-y: auto;
         }
         .legend-box {
-            background: #161b22;
-            border: 1px solid #30363d; border-radius: 6px;
+            background: #25292e;
+            border: 1px solid #3c4043; border-radius: 6px;
             padding: 8px;
         }
         .legend-box h3 {
-            font-size: 12px; color: #58a6ff; margin-bottom: 6px;
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
             display: flex; justify-content: space-between; align-items: center;
         }
         .legend-box h3 button {
             font-size: 10px; padding: 1px 5px;
-            background: #21262d; color: #8b949e;
-            border: 1px solid #30363d; border-radius: 3px; cursor: pointer;
+            background: #30343a; color: #9aa0a6;
+            border: 1px solid #3c4043; border-radius: 3px; cursor: pointer;
         }
+        .legend-box h3 button:hover { background: #3c4043; }
         .legend-item {
-            display: flex; align-items: center; gap: 5px;
-            padding: 3px 5px; margin-bottom: 1px;
+            display: flex; align-items: center; gap: 6px;
+            padding: 4px 6px; margin-bottom: 1px;
             border-radius: 3px; cursor: pointer;
             font-size: 12px;
             border-left: 3px solid transparent;
             user-select: none;
+            transition: background 0.1s;
         }
-        .legend-item:hover { background: #21262d; }
+        .legend-item:hover { background: #2f3439; }
         .legend-item.active {
-            background: #1f6feb33;
-            border-left-color: #58a6ff;
+            background: #3d4a5c;
+            border-left-color: #8ab4f8;
         }
         .legend-color {
             width: 12px; height: 12px; border-radius: 2px;
             flex-shrink: 0;
         }
         .legend-item .count {
-            margin-left: auto; color: #6e7681; font-size: 11px;
+            margin-left: auto; color: #80868b; font-size: 11px;
         }
 
         #canvasWrap {
             position: relative; flex: 1;
-            background: #161b22;
-            border: 1px solid #30363d; border-radius: 6px;
+            background: #202327;
+            border: 1px solid #3c4043; border-radius: 6px;
             overflow: hidden; cursor: grab;
         }
         #canvasWrap.dragging { cursor: grabbing; }
         canvas { display: block; position: absolute; top: 0; left: 0; }
 
         .hud {
-            position: absolute; top: 6px;
-            background: rgba(13, 17, 23, 0.9);
-            border: 1px solid #30363d; border-radius: 4px;
-            padding: 2px 6px; font-size: 11px; color: #8b949e;
+            position: absolute; top: 8px;
+            background: rgba(26, 29, 33, 0.9);
+            border: 1px solid #3c4043; border-radius: 4px;
+            padding: 3px 8px; font-size: 11px; color: #9aa0a6;
             pointer-events: none;
         }
-        .hud b { color: #58a6ff; }
-        #coordInfo { left: 6px; }
-        #zoomInfo { right: 6px; }
+        .hud b { color: #8ab4f8; }
+        #coordInfo { left: 8px; }
+        #zoomInfo { right: 8px; }
 
         #tooltip {
             position: fixed; pointer-events: none;
-            background: rgba(13, 17, 23, 0.98);
-            border: 1px solid #58a6ff; border-radius: 4px;
-            padding: 5px 8px; font-size: 11px; color: #c9d1d9;
+            background: rgba(26, 29, 33, 0.98);
+            border: 1px solid #5c7a99; border-radius: 5px;
+            padding: 6px 10px; font-size: 11px; color: #d4d8dd;
             white-space: nowrap; display: none; z-index: 9999;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            line-height: 1.5;
         }
 
         #listPanel {
-            width: 240px; flex-shrink: 0;
-            background: #161b22;
-            border: 1px solid #30363d; border-radius: 6px;
+            width: 250px; flex-shrink: 0;
+            background: #25292e;
+            border: 1px solid #3c4043; border-radius: 6px;
             padding: 8px; overflow-y: auto;
             font-size: 12px;
         }
         #listPanel h3 {
-            font-size: 12px; color: #58a6ff; margin-bottom: 6px;
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
             display: flex; justify-content: space-between; align-items: center;
-            position: sticky; top: 0; background: #161b22;
-            padding: 2px 0;
+            position: sticky; top: 0; background: #25292e;
+            padding: 2px 0; z-index: 1;
         }
         .vein-item {
-            padding: 3px 5px; margin-bottom: 2px;
-            border-radius: 3px; cursor: pointer;
+            padding: 4px 6px; margin-bottom: 3px;
+            border-radius: 4px; cursor: pointer;
             border-left: 3px solid transparent;
             transition: background 0.1s;
         }
-        .vein-item:hover { background: #21262d; }
-        .vein-item.active { background: #1f6feb33; border-left-color: #58a6ff; }
-        .vein-item .name { color: #c9d1d9; display: flex; justify-content: space-between; }
-        .vein-item .coord { color: #6e7681; font-size: 11px; display: flex; justify-content: space-between; }
-        .vein-item .dist { color: #58a6ff; }
-        .vein-item .oil { color: #d29922; font-size: 11px; }
+        .vein-item:hover { background: #2f3439; }
+        .vein-item.active { background: #3d4a5c; border-left-color: #8ab4f8; }
+        .vein-item .name { color: #d4d8dd; display: flex; justify-content: space-between; }
+        .vein-item .coord { color: #80868b; font-size: 11px; display: flex; justify-content: space-between; margin-top: 1px; }
+        .vein-item .dist { color: #8ab4f8; }
+        .vein-item .oil { color: #c9a86a; font-size: 11px; margin-top: 1px; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5f6368; }
     </style>
 </head>
 
@@ -146,6 +161,7 @@
 
     <div class="toolbar">
         <label>存档<input type="file" id="fileInput" accept=".dat"></label>
+        <label>维度<select id="dimSelect"></select></label>
         <label>基地X<input type="number" id="baseX" value="0" step="16"></label>
         <label>基地Z<input type="number" id="baseZ" value="0" step="16"></label>
         <label>总矿量<input type="number" id="maxYield" value="784000" step="1024"></label>
@@ -160,7 +176,7 @@
     <div class="stats">
         <span>总矿脉<b id="totalCount">0</b></span>
         <span>当前显示<b id="visibleCount">0</b></span>
-        <span>维度<b id="dimList">-</b></span>
+        <span>当前维度<b id="curDim">-</b></span>
         <span>基地<b id="baseInfo">(0, 0)</b></span>
     </div>
 
@@ -183,7 +199,7 @@
         </div>
 
         <div id="listPanel">
-            <h3>矿脉列表（按距离） <span id="listCount" style="color:#8b949e;font-weight:normal;">0</span></h3>
+            <h3>矿脉列表（按距离） <span id="listCount" style="color:#80868b;font-weight:normal;">0</span></h3>
             <div id="veinList"></div>
         </div>
     </div>
@@ -192,8 +208,6 @@
 
     <script>
         // ==================== 常量 ====================
-        // MAX_YIELD 现在是动态的，从输入框读取
-
         const RESERVE_LEVELS = [
             { id: 'full',     label: '满 (100%)',     color: '#238636', min: 0.95, max: 1.01 },
             { id: 'high',     label: '高 (75-95%)',   color: '#3fb950', min: 0.75, max: 0.95 },
@@ -326,9 +340,10 @@
 
         // ==================== 状态 ====================
         const state = {
-            veins: [],
-            visible: [],
-            dimBounds: {},
+            veins: [],            // 全部维度的矿脉
+            visible: [],          // 当前维度 + 筛选后的矿脉
+            dimBounds: {},        // 按维度分别计算边界
+            allDims: [],          // 所有维度 ID 列表
             currentDim: null,
             zoom: 1.0,
             panX: 0,
@@ -361,6 +376,7 @@
         const veinList = $('veinList');
         const reserveLegend = $('reserveLegend');
         const mineralLegend = $('mineralLegend');
+        const dimSelect = $('dimSelect');
 
         // ==================== 工具 ====================
         function setStatus(msg, isError = false) {
@@ -380,12 +396,10 @@
             return id.split('/').pop().replace(/_/g, ' ');
         }
 
-        /** 计算剩余率 */
         function getReserve(vein) {
             return Math.max(0, 1 - vein.depletion / state.maxYield);
         }
 
-        /** 计算剩余矿量 */
         function getRemaining(vein) {
             return Math.max(0, state.maxYield - vein.depletion);
         }
@@ -440,6 +454,7 @@
         function renderOffscreen() {
             if (!state.currentDim) return;
             const bounds = state.dimBounds[state.currentDim];
+            if (!bounds) return;
             const off = getOffscreenSize();
 
             const cacheKey = [
@@ -456,9 +471,7 @@
                 state.selectedVein ? veinKey(state.selectedVein) : '',
             ].join('|');
 
-            if (state.offscreen && !state.offscreenDirty && state.offscreenKey === cacheKey) {
-                return;
-            }
+            if (state.offscreen && !state.offscreenDirty && state.offscreenKey === cacheKey) return;
 
             if (!state.offscreen || state.offscreenW !== off.w || state.offscreenH !== off.h) {
                 state.offscreen = document.createElement('canvas');
@@ -469,7 +482,7 @@
             }
 
             const octx = state.offscreen.getContext('2d');
-            octx.fillStyle = '#0d1117';
+            octx.fillStyle = '#202327';
             octx.fillRect(0, 0, off.w, off.h);
 
             const scale = state._scale;
@@ -516,9 +529,9 @@
             const by = toScreenY(state.baseZ);
             if (bx > -20 && bx < off.w + 20 && by > -20 && by < off.h + 20) {
                 octx.save();
-                octx.shadowColor = '#f0f6fc';
+                octx.shadowColor = '#e8eaed';
                 octx.shadowBlur = 8;
-                octx.strokeStyle = '#f0f6fc';
+                octx.strokeStyle = '#e8eaed';
                 octx.lineWidth = 2;
                 const s = 8;
                 octx.beginPath();
@@ -540,9 +553,9 @@
                 const py = toScreenY(v.z);
                 const pr = Math.max(2, v.radius * scale);
                 octx.save();
-                octx.shadowColor = '#58a6ff';
+                octx.shadowColor = '#00e5ff';
                 octx.shadowBlur = 12;
-                octx.strokeStyle = '#58a6ff';
+                octx.strokeStyle = '#00e5ff';
                 octx.lineWidth = Math.max(3, pr * 0.15);
                 octx.beginPath();
                 octx.arc(px, py, pr, 0, Math.PI * 2);
@@ -569,7 +582,7 @@
                 canvas.style.height = ch + 'px';
             }
 
-            ctx.fillStyle = '#0d1117';
+            ctx.fillStyle = '#202327';
             ctx.fillRect(0, 0, cw, ch);
 
             if (state.offscreen) {
@@ -586,6 +599,7 @@
         // ==================== 视图控制 ====================
         function computeBestScale() {
             const bounds = state.dimBounds[state.currentDim];
+            if (!bounds) return 1;
             const worldW = bounds.maxX - bounds.minX + 1;
             const worldH = bounds.maxZ - bounds.minZ + 1;
             const cw = wrap.clientWidth;
@@ -600,6 +614,7 @@
         function resetView() {
             if (!state.currentDim) return;
             const bounds = state.dimBounds[state.currentDim];
+            if (!bounds) return;
             const worldW = bounds.maxX - bounds.minX + 1;
             const worldH = bounds.maxZ - bounds.minZ + 1;
 
@@ -617,13 +632,12 @@
             scheduleRender();
         }
 
-        function fitView() {
-            resetView();
-        }
+        function fitView() { resetView(); }
 
         function goToWorld(wx, wz) {
             if (!state.currentDim) return;
             const bounds = state.dimBounds[state.currentDim];
+            if (!bounds) return;
             const cw = wrap.clientWidth;
             const ch = wrap.clientHeight;
             state.panX = cw / 2 - (wx - bounds.minX) * state._scale;
@@ -634,6 +648,31 @@
 
         function goToBase() {
             goToWorld(state.baseX, state.baseZ);
+        }
+
+        // ==================== 维度切换 ====================
+        function buildDimSelect() {
+            dimSelect.innerHTML = '';
+            for (const dim of state.allDims) {
+                const opt = document.createElement('option');
+                opt.value = dim;
+                opt.textContent = dim;
+                dimSelect.appendChild(opt);
+            }
+            if (state.currentDim) dimSelect.value = state.currentDim;
+        }
+
+        function switchDim(newDim) {
+            if (!state.dimBounds[newDim]) return;
+            state.currentDim = newDim;
+            state.selectedVein = null;
+
+            // 重新过滤当前维度
+            applyFilter();
+            resetView();
+            updateStats();
+            updateListPanel();
+            setStatus(`已切换到维度 ${newDim}`);
         }
 
         // ==================== 缩放/平移 ====================
@@ -716,7 +755,7 @@
                     `已开采：${formatNumber(found.depletion)}<br>` +
                     `剩余矿量：<b style="color:#d29922">${formatNumber(remaining)}</b><br>` +
                     `剩余率：<b style="color:${level.color}">${reservePct.toFixed(1)}% (${level.label})</b><br>` +
-                    `距基地：<b style="color:#58a6ff">${dist.toFixed(0)} 方块</b>`;
+                    `距基地：<b style="color:#8ab4f8">${dist.toFixed(0)} 方块</b>`;
             } else {
                 tooltip.style.display = 'none';
             }
@@ -773,7 +812,7 @@
             document.getElementById('listCount').textContent = visible.length;
 
             if (visible.length === 0) {
-                veinList.innerHTML = '<div style="color:#8b949e;padding:6px;">无匹配矿脉</div>';
+                veinList.innerHTML = '<div style="color:#80868b;padding:6px;">无匹配矿脉</div>';
                 return;
             }
 
@@ -800,7 +839,7 @@
                 </div>`;
             }
             if (visible.length > 300) {
-                html += `<div style="color:#8b949e;padding:4px;">...还有 ${visible.length - 300} 条</div>`;
+                html += `<div style="color:#80868b;padding:4px;">...还有 ${visible.length - 300} 条</div>`;
             }
             veinList.innerHTML = html;
 
@@ -820,7 +859,6 @@
                 const count = state.reserveCounts[lv.id] || 0;
                 const el = document.createElement('div');
                 el.className = 'legend-item' + (state.reserveFilter.has(lv.id) ? ' active' : '');
-                el.dataset.id = lv.id;
                 el.innerHTML = `<span class="legend-color" style="background:${lv.color}"></span>
                     <span>${lv.label}</span><span class="count">${count}</span>`;
                 el.onclick = () => toggleReserveFilter(lv.id);
@@ -833,7 +871,6 @@
                 const color = mineralColor(id);
                 const el = document.createElement('div');
                 el.className = 'legend-item' + (state.mineralFilter.has(id) ? ' active' : '');
-                el.dataset.id = id;
                 el.innerHTML = `<span class="legend-color" style="background:${color}"></span>
                     <span>${mineralLabel(id)}</span><span class="count">${count}</span>`;
                 el.onclick = () => toggleMineralFilter(id);
@@ -857,19 +894,19 @@
 
         // ==================== 统计 ====================
         function updateStats() {
-            const dims = [...new Set(state.veins.map(v => v.dimension))];
             $('totalCount').textContent = state.veins.length.toLocaleString();
             $('visibleCount').textContent = state.visible.length.toLocaleString();
-            $('dimList').textContent = dims.join(', ') || '-';
+            $('curDim').textContent = state.currentDim || '-';
             $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
         }
 
-        // ==================== 重新计算统计 ====================
+        // ==================== 重新计算统计（当前维度） ====================
         function recalcStats() {
             state.reserveCounts = {};
             state.mineralCounts = {};
             for (let i = 0; i < state.veins.length; i++) {
                 const v = state.veins[i];
+                if (v.dimension !== state.currentDim) continue;
                 const level = getReserveLevel(v);
                 state.reserveCounts[level.id] = (state.reserveCounts[level.id] || 0) + 1;
                 state.mineralCounts[v.mineral] = (state.mineralCounts[v.mineral] || 0) + 1;
@@ -885,6 +922,7 @@
             const visible = [];
             for (let i = 0; i < state.veins.length; i++) {
                 const v = state.veins[i];
+                if (v.dimension !== state.currentDim) continue;
                 if (hasReserve) {
                     const level = getReserveLevel(v);
                     if (!state.reserveFilter.has(level.id)) continue;
@@ -922,7 +960,9 @@
                     state.veins = veins;
                     state.visible = veins;
                     state.dimBounds = {};
+                    state.allDims = [];
 
+                    // 按维度分别计算边界
                     for (let i = 0; i < veins.length; i++) {
                         const v = veins[i];
                         if (!state.dimBounds[v.dimension]) {
@@ -930,6 +970,7 @@
                                 minX: v.x - v.radius, maxX: v.x + v.radius,
                                 minZ: v.z - v.radius, maxZ: v.z + v.radius
                             };
+                            state.allDims.push(v.dimension);
                         } else {
                             const b = state.dimBounds[v.dimension];
                             if (v.x - v.radius < b.minX) b.minX = v.x - v.radius;
@@ -939,9 +980,18 @@
                         }
                     }
 
-                    const dims = Object.keys(state.dimBounds);
-                    if (dims.length === 0) { setStatus('数据为空', true); return; }
-                    state.currentDim = dims[0];
+                    if (state.allDims.length === 0) { setStatus('数据为空', true); return; }
+
+                    // 按维度排序，主世界优先
+                    state.allDims.sort((a, b) => {
+                        if (a === 'minecraft:overworld') return -1;
+                        if (b === 'minecraft:overworld') return 1;
+                        return a.localeCompare(b);
+                    });
+                    state.currentDim = state.allDims[0];
+
+                    // 构建维度下拉框
+                    buildDimSelect();
 
                     recalcStats();
                     resetView();
@@ -950,7 +1000,7 @@
                     updateListPanel();
 
                     const t2 = performance.now();
-                    setStatus(`已加载 ${veins.length} 条 · 解析 ${(t1 - t0).toFixed(0)}ms · 渲染 ${(t2 - t1).toFixed(0)}ms`);
+                    setStatus(`已加载 ${veins.length} 条 · ${state.allDims.length} 个维度 · 解析 ${(t1 - t0).toFixed(0)}ms · 渲染 ${(t2 - t1).toFixed(0)}ms`);
                 } catch (err) {
                     setStatus(`解析失败：${err.message}`, true);
                     console.error(err);
@@ -963,6 +1013,10 @@
         $('fileInput').onchange = e => {
             const file = e.target.files[0];
             if (file) loadFromFile(file);
+        };
+
+        dimSelect.onchange = () => {
+            switchDim(dimSelect.value);
         };
 
         $('resetViewBtn').onclick = resetView;
@@ -997,17 +1051,17 @@
 
         $('baseX').oninput = () => {
             state.baseX = Number($('baseX').value) || 0;
-            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
-            state.offscreenDirty = true;
+            updateStats();
             updateListPanel();
+            state.offscreenDirty = true;
             scheduleRender();
         };
 
         $('baseZ').oninput = () => {
             state.baseZ = Number($('baseZ').value) || 0;
-            $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
-            state.offscreenDirty = true;
+            updateStats();
             updateListPanel();
+            state.offscreenDirty = true;
             scheduleRender();
         };
 

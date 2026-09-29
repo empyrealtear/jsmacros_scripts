@@ -364,10 +364,10 @@ const CDGOil = {
      */
     getBaseOilAmountFast(x, z) {
         let biome = CDGOil.getNoiseBiome(x * 16, z * 16)
-        if (CDGTags?.DENY_OIL_BIOMES && holder.containsTag(CDGTags.DENY_OIL_BIOMES))
+        if (CDGTags?.DENY_OIL_BIOMES && biome.containsTag(CDGTags.DENY_OIL_BIOMES))
             return 0
 
-        let isHighInOil = CDGTags?.OIL_BIOMES && holder.containsTag(CDGTags.OIL_BIOMES)
+        let isHighInOil = CDGTags?.OIL_BIOMES && biome.containsTag(CDGTags.OIL_BIOMES)
         if ((isHighInOil && CDGConfig.DISABLE_HIGH_OIL_CHUNKS?.get()) ||
             (!isHighInOil && CDGConfig.DISABLE_NORMAL_OIL_CHUNKS?.get()))
             return 0
@@ -582,7 +582,7 @@ const CDGOil = {
         const width = 10
         const ratio = done / total
         const filled = Math.round(width * ratio)
-        const bar = '▮'.repeat(filled) + '▯'.repeat(width - filled)
+        const bar = '█'.repeat(filled) + '░'.repeat(width - filled)
 
         const elapsed = (Date.now() - startTime) / 1000
         const remain = elapsed > 0 && done > 0

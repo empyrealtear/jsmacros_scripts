@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>CDG 油田缓存可视化</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 16px;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #58a6ff;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 8px 10px;
+            background: #161b22;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .toolbar label {
+            color: #8b949e;
+        }
+
+        .toolbar input[type="number"] {
+            width: 110px;
+            padding: 3px 6px;
+            background: #0d1117;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .toolbar input[type="file"] {
+            color: #c9d1d9;
+            font-size: 13px;
+        }
+
+        .toolbar button {
+            padding: 4px 10px;
+            background: #238636;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .toolbar button:hover {
+            background: #2ea043;
+        }
+
+        .toolbar button.danger {
+            background: #da3633;
+        }
+
+        .toolbar button.danger:hover {
+            background: #f85149;
+        }
+
+        .toolbar button.highlight {
+            background: #a371f7;
+        }
+
+        .toolbar button.highlight:hover {
+            background: #bc8cff;
+        }
+
+        .status {
+            color: #8b949e;
+            margin-left: auto;
+        }
+
+        .stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #8b949e;
+        }
+
+        .stats b {
+            color: #58a6ff;
+        }
+
+        #canvasWrap {
+            position: relative;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: grab;
+            height: 700px;
+        }
+
+        #canvasWrap.dragging {
+            cursor: grabbing;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .hud {
+            position: absolute;
+            top: 8px;
+            background: rgba(13, 17, 23, 0.85);
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 12px;
+            color: #8b949e;
+            pointer-events: none;
+        }
+
+        .hud b {
+            color: #58a6ff;
+        }
+
+        #coordInfo {
+            left: 8px;
+        }
+
+        #zoomInfo {
+            right: 8px;
+        }
+
+        #tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: rgba(13, 17, 23, 0.98);
+            border: 1px solid #58a6ff;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: #c9d1d9;
+            white-space: nowrap;
+            display: none;
+            z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        #legend {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 2px;
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>CDG 油田缓存可视化</h1>
+
+    <div class="toolbar">
+        <label>缓存文件<input type="file" id="fileInput" accept=".json"></label>
+        <label>无限阈值<input type="number" id="infiniteThreshold" value="40000000" min="1" step="1000000"></label>
+        <label>最小油量<input type="number" id="minOil" value="0" min="0" step="100000"></label>
+        <button id="renderBtn">渲染</button>
+        <button id="resetViewBtn">重置视图</button>
+        <button id="topBtn">Top 20</button>
+        <button id="highlightInfiniteBtn" class="highlight">高亮无限</button>
+        <span class="status" id="status">等待加载...</span>
+    </div>
+
+    <div class="stats">
+        <span>总<b id="totalCount">0</b></span>
+        <span>有油<b id="oilCount">0</b></span>
+        <span>无油<b id="zeroCount">0</b></span>
+        <span>未缓存<b id="missingCount">0</b></span>
+        <span>无限<b id="infiniteCount">0</b></span>
+        <span>维度<b id="dimList">-</b></span>
+    </div>
+
+    <div id="canvasWrap">
+        <canvas id="canvas"></canvas>
+        <div class="hud" id="coordInfo">方块 -,- | 区块 -,-</div>
+        <div class="hud" id="zoomInfo">100%</div>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <div id="legend">
+        <div class="legend-item"><span class="legend-color"
+                style="background:#0d1117;border:1px solid #30363d"></span>未缓存</div>
+        <div class="legend-item"><span class="legend-color" style="background:#6e7681"></span>无油</div>
+        <div class="legend-item"><span class="legend-color" style="background:#1f6feb"></span>几乎枯竭</div>
+        <div class="legend-item"><span class="legend-color" style="background:#00bcd4"></span>微量</div>
+        <div class="legend-item"><span class="legend-color" style="background:#3fb950"></span>低</div>
+        <div class="legend-item"><span class="legend-color" style="background:#d29922"></span>中等</div>
+        <div class="legend-item"><span class="legend-color" style="background:#f0883e"></span>高</div>
+        <div class="legend-item"><span class="legend-color" style="background:#f85149"></span>非常高</div>
+        <div class="legend-item"><span class="legend-color" style="background:#a371f7"></span>无限</div>
+        <div class="legend-item"><span class="legend-color"
+                style="background:transparent;border:2px solid #f0f6fc"></span>高亮</div>
+    </div>
+
+    <script>
+        // ==================== 常量 ====================
+        const RATIO_BOUNDS = [0, 0.10, 0.25, 0.40, 0.55, 0.75, 1.0];
+        const LEVELS = [
+            { label: '无油', color: '#6e7681' },
+            { label: '几乎枯竭', color: '#1f6feb' },
+            { label: '微量', color: '#00bcd4' },
+            { label: '低', color: '#3fb950' },
+            { label: '中等', color: '#d29922' },
+            { label: '高', color: '#f0883e' },
+            { label: '非常高', color: '#f85149' },
+        ];
+        const INFINITE_LEVEL = { label: '无限', color: '#a371f7' };
+
+        // ==================== 状态 ====================
+        const state = {
+            blocks: [],
+            blockMap: new Map(),
+            dimBounds: {},
+            currentDim: null,
+            baseCellSize: 8,
+            zoom: 1.0,
+            panX: 0,
+            panY: 0,
+            minOil: 0,
+            infiniteThreshold: 40000000,
+            highlightInfinite: false,
+            // 离屏画布
+            offscreen: null,
+            offscreenDirty: true,
+            offscreenDim: null,
+            offscreenThreshold: 0,
+            offscreenMinOil: 0,
+        };
+
+        // ==================== DOM ====================
+        const $ = id => document.getElementById(id);
+        const canvas = $('canvas');
+        const ctx = canvas.getContext('2d');
+        const wrap = $('canvasWrap');
+        const tooltip = $('tooltip');
+        const coordInfo = $('coordInfo');
+        const zoomInfo = $('zoomInfo');
+
+        // ==================== 工具 ====================
+        function getOilLevel(oil, max) {
+            if (oil >= max) return INFINITE_LEVEL;
+            if (oil <= 0) return LEVELS[0];
+            const r = oil / max;
+            for (let i = 1; i < RATIO_BOUNDS.length; i++) {
+                if (r < RATIO_BOUNDS[i]) return LEVELS[i];
+            }
+            return LEVELS[LEVELS.length - 1];
+        }
+
+        function setStatus(msg, isError = false) {
+            const el = $('status');
+            el.textContent = msg;
+            el.style.color = isError ? '#f85149' : '#8b949e';
+        }
+
+        // ==================== 渲染调度 ====================
+        let renderPending = false;
+        function scheduleRender() {
+            if (renderPending) return;
+            renderPending = true;
+            requestAnimationFrame(() => {
+                renderPending = false;
+                render();
+            });
+        }
+
+        // ==================== 离屏画布 ====================
+        function renderOffscreen() {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const width = bounds.maxX - bounds.minX + 1;
+            const height = bounds.maxZ - bounds.minZ + 1;
+            const cs = state.baseCellSize;
+
+            const cacheValid = state.offscreen
+                && state.offscreen.width === width * cs
+                && state.offscreen.height === height * cs
+                && !state.offscreenDirty
+                && state.offscreenDim === state.currentDim
+                && state.offscreenThreshold === state.infiniteThreshold
+                && state.offscreenMinOil === state.minOil;
+
+            if (cacheValid) return;
+
+            if (!state.offscreen || state.offscreen.width !== width * cs || state.offscreen.height !== height * cs) {
+                state.offscreen = document.createElement('canvas');
+                state.offscreen.width = width * cs;
+                state.offscreen.height = height * cs;
+            }
+
+            const octx = state.offscreen.getContext('2d');
+            octx.fillStyle = '#0d1117';
+            octx.fillRect(0, 0, state.offscreen.width, state.offscreen.height);
+
+            for (const b of state.blocks) {
+                if (b.dim !== state.currentDim || b.oil < state.minOil) continue;
+                const px = (b.x - bounds.minX) * cs;
+                const py = (b.z - bounds.minZ) * cs;
+                octx.fillStyle = getOilLevel(b.oil, state.infiniteThreshold).color;
+                octx.fillRect(px, py, cs, cs);
+            }
+
+            state.offscreenDirty = false;
+            state.offscreenDim = state.currentDim;
+            state.offscreenThreshold = state.infiniteThreshold;
+            state.offscreenMinOil = state.minOil;
+        }
+
+        // ==================== 渲染 ====================
+        function render() {
+            if (!state.currentDim) return;
+            const bounds = state.dimBounds[state.currentDim];
+            const width = bounds.maxX - bounds.minX + 1;
+            const height = bounds.maxZ - bounds.minZ + 1;
+
+            state.baseCellSize = Math.max(2, Math.min(
+                Math.floor(wrap.clientWidth / width),
+                Math.floor(wrap.clientHeight / height),
+                20
+            ));
+
+            renderOffscreen();
+
+            const cs = state.baseCellSize * state.zoom;
+            canvas.width = width * cs;
+            canvas.height = height * cs;
+            canvas.style.width = canvas.width + 'px';
+            canvas.style.height = canvas.height + 'px';
+            canvas.style.left = state.panX + 'px';
+            canvas.style.top = state.panY + 'px';
+
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(state.offscreen, 0, 0, state.offscreen.width, state.offscreen.height,
+                0, 0, canvas.width, canvas.height);
+
+            if (state.highlightInfinite) {
+                ctx.save();
+                ctx.shadowColor = '#f0f6fc';
+                ctx.shadowBlur = 8;
+                for (const b of state.blocks) {
+                    if (b.dim !== state.currentDim || b.oil < state.infiniteThreshold || b.oil < state.minOil) continue;
+                    const px = (b.x - bounds.minX) * cs;
+                    const py = (b.z - bounds.minZ) * cs;
+                    ctx.strokeStyle = '#f0f6fc';
+                    ctx.lineWidth = Math.max(2, cs * 0.2);
+                    ctx.strokeRect(px + ctx.lineWidth / 2, py + ctx.lineWidth / 2,
+                        cs - ctx.lineWidth, cs - ctx.lineWidth);
+                }
+                ctx.restore();
+            }
+
+            zoomInfo.textContent = `${(state.zoom * 100).toFixed(0)}%`;
+        }
+
+        function resetView() {
+            state.zoom = 1.0;
+            state.panX = 0;
+            state.panY = 0;
+            scheduleRender();
+        }
+
+        // ==================== 缩放/平移 ====================
+        wrap.addEventListener('wheel', e => {
+            if (!state.currentDim) return;
+            e.preventDefault();
+            const rect = wrap.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const oldZoom = state.zoom;
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            state.zoom = Math.max(0.1, Math.min(10, state.zoom * factor));
+            state.panX = mx - (mx - state.panX) * (state.zoom / oldZoom);
+            state.panY = my - (my - state.panY) * (state.zoom / oldZoom);
+            scheduleRender();
+        }, { passive: false });
+
+        let dragging = false, dsx = 0, dsy = 0, dspx = 0, dspy = 0;
+        wrap.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            dragging = true;
+            wrap.classList.add('dragging');
+            dsx = e.clientX; dsy = e.clientY;
+            dspx = state.panX; dspy = state.panY;
+        });
+        window.addEventListener('mousemove', e => {
+            if (!dragging) return;
+            state.panX = dspx + (e.clientX - dsx);
+            state.panY = dspy + (e.clientY - dsy);
+            canvas.style.left = state.panX + 'px';
+            canvas.style.top = state.panY + 'px';
+            scheduleRender();
+        });
+        window.addEventListener('mouseup', () => {
+            if (dragging) { dragging = false; wrap.classList.remove('dragging'); }
+        });
+
+        // ==================== 悬停 ====================
+        canvas.addEventListener('mousemove', e => {
+            if (dragging) return;
+            const rect = canvas.getBoundingClientRect();
+            const cs = state.baseCellSize * state.zoom;
+            const bounds = state.dimBounds[state.currentDim];
+            const cx = Math.floor((e.clientX - rect.left) / cs) + bounds.minX;
+            const cz = Math.floor((e.clientY - rect.top) / cs) + bounds.minZ;
+            const bx = cx * 16, bz = cz * 16;
+
+            coordInfo.innerHTML = `方块 <b>${bx}</b>,<b>${bz}</b> | 区块 <b>${cx}</b>,<b>${cz}</b>`;
+
+            const found = state.blockMap.get(`${state.currentDim}|${cx} ${cz}`);
+            tooltip.style.display = 'block';
+
+            const tw = 260, th = 110, pad = 15;
+            let left = e.clientX + pad, top = e.clientY + pad;
+            if (left + tw > window.innerWidth) left = e.clientX - tw - pad;
+            if (top + th > window.innerHeight) top = e.clientY - th - pad;
+            if (left < 0) left = pad;
+            if (top < 0) top = pad;
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+
+            if (found) {
+                const lv = getOilLevel(found.oil, state.infiniteThreshold);
+                const pct = ((found.oil / state.infiniteThreshold) * 100).toFixed(2);
+                const inf = found.oil >= state.infiniteThreshold;
+                tooltip.innerHTML =
+                    `方块 (${bx}, ${bz})<br>` +
+                    `区块 (${cx}, ${cz})<br>` +
+                    `油量：<b style="color:${lv.color}">${found.oil.toLocaleString()} mB</b><br>` +
+                    `等级：<b style="color:${lv.color}">${lv.label}</b> (${pct}%)` +
+                    (inf ? '<br><span style="color:#f0f6fc">★ 无限油田</span>' : '');
+            } else {
+                tooltip.innerHTML =
+                    `方块 (${bx}, ${bz})<br>` +
+                    `区块 (${cx}, ${cz})<br>` +
+                    `状态：<b style="color:#58a6ff">未缓存</b>`;
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+            coordInfo.innerHTML = '方块 -,- | 区块 -,-';
+        });
+
+        // ==================== 增量边界更新 ====================
+        function updateBounds(b) {
+            if (!state.dimBounds[b.dim]) {
+                state.dimBounds[b.dim] = { minX: b.x, maxX: b.x, minZ: b.z, maxZ: b.z };
+                return true;
+            }
+            const d = state.dimBounds[b.dim];
+            let changed = false;
+            if (b.x < d.minX) { d.minX = b.x; changed = true; }
+            if (b.x > d.maxX) { d.maxX = b.x; changed = true; }
+            if (b.z < d.minZ) { d.minZ = b.z; changed = true; }
+            if (b.z > d.maxZ) { d.maxZ = b.z; changed = true; }
+            return changed;
+        }
+
+        // ==================== 统计 ====================
+        function updateStats() {
+            const { blocks, dimBounds, currentDim } = state;
+            const withOil = blocks.filter(b => b.oil > 0).length;
+            const zero = blocks.filter(b => b.oil === 0).length;
+            const inf = blocks.filter(b => b.oil >= state.infiniteThreshold).length;
+            const dims = [...new Set(blocks.map(b => b.dim))];
+
+            $('totalCount').textContent = blocks.length.toLocaleString();
+            $('oilCount').textContent = withOil.toLocaleString();
+            $('zeroCount').textContent = zero.toLocaleString();
+            $('infiniteCount').textContent = inf.toLocaleString();
+            $('dimList').textContent = dims.join(', ') || '-';
+
+            if (currentDim && dimBounds[currentDim]) {
+                const b = dimBounds[currentDim];
+                const area = (b.maxX - b.minX + 1) * (b.maxZ - b.minZ + 1);
+                $('missingCount').textContent = (area - blocks.length).toLocaleString();
+            }
+        }
+
+        // ==================== 加载文件 ====================
+        function loadFromFile(file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+
+                    // 清空旧数据
+                    state.blocks = [];
+                    state.blockMap.clear();
+                    state.dimBounds = {};
+                    state.currentDim = null;
+
+                    for (const key in data) {
+                        const oil = data[key];
+                        if (typeof oil !== 'number') continue;
+                        const [dim, coord] = key.split('|');
+                        if (!coord) continue;
+                        const [x, z] = coord.split(' ').map(Number);
+                        if (isNaN(x) || isNaN(z)) continue;
+
+                        const b = { dim, x, z, oil };
+                        state.blocks.push(b);
+                        state.blockMap.set(key, b);
+                        updateBounds(b);
+                    }
+
+                    const dims = Object.keys(state.dimBounds);
+                    if (dims.length === 0) {
+                        setStatus('缓存为空', true);
+                        return;
+                    }
+
+                    state.currentDim = dims[0];
+                    state.offscreenDirty = true;
+
+                    resetView();
+                    updateStats();
+                    scheduleRender();
+                    setStatus(`已加载 ${file.name} · ${state.blocks.length} 条`);
+                } catch (err) {
+                    setStatus(`解析失败：${err.message}`, true);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // ==================== 事件 ====================
+        $('fileInput').onchange = e => {
+            const file = e.target.files[0];
+            if (file) loadFromFile(file);
+        };
+
+        $('renderBtn').onclick = () => {
+            state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
+            state.minOil = Number($('minOil').value) || 0;
+            state.offscreenDirty = true;
+            scheduleRender();
+            updateStats();
+        };
+
+        $('resetViewBtn').onclick = resetView;
+
+        $('topBtn').onclick = () => {
+            const sorted = [...state.blocks].sort((a, b) => b.oil - a.oil).slice(0, 20);
+            const lines = sorted.map((b, i) => {
+                const lv = getOilLevel(b.oil, state.infiniteThreshold);
+                const pct = ((b.oil / state.infiniteThreshold) * 100).toFixed(1);
+                const inf = b.oil >= state.infiniteThreshold ? ' ★' : '';
+                return `${i + 1}. 方块(${b.x * 16}, ${b.z * 16}) 区块(${b.x}, ${b.z}): ${b.oil.toLocaleString()} mB (${lv.label} ${pct}%)${inf}`;
+            });
+            alert('前 20 名：\n\n' + lines.join('\n'));
+        };
+
+        $('highlightInfiniteBtn').onclick = () => {
+            state.highlightInfinite = !state.highlightInfinite;
+            const btn = $('highlightInfiniteBtn');
+            if (state.highlightInfinite) {
+                btn.textContent = '取消高亮';
+                btn.classList.remove('highlight');
+                btn.classList.add('danger');
+            } else {
+                btn.textContent = '高亮无限';
+                btn.classList.remove('danger');
+                btn.classList.add('highlight');
+            }
+            scheduleRender();
+        };
+
+        // ==================== 启动 ====================
+        state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
+        state.minOil = Number($('minOil').value) || 0;
+        setStatus('请选择缓存文件');
+    </script>
+</body>
+
+</html>

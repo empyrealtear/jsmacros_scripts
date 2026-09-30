@@ -5,11 +5,7 @@
     <meta charset="UTF-8">
     <title>IE 矿脉可视化</title>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -18,321 +14,224 @@
             padding: 12px;
         }
 
-        h1 {
-            font-size: 16px;
-            margin-bottom: 8px;
-            color: #8ab4f8;
-        }
+        h1 { font-size: 16px; margin-bottom: 8px; color: #8ab4f8; }
 
         .toolbar {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-bottom: 8px;
-            padding: 6px 8px;
-            background: #25292e;
-            border-radius: 6px;
-            font-size: 12px;
+            display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+            margin-bottom: 8px; padding: 6px 8px;
+            background: #25292e; border-radius: 6px; font-size: 12px;
         }
 
-        .toolbar label {
-            color: #9aa0a6;
-        }
+        .toolbar label { color: #9aa0a6; }
 
-        .toolbar input[type="file"] {
-            color: #d4d8dd;
-            font-size: 12px;
-        }
+        .toolbar input[type="file"] { color: #d4d8dd; font-size: 12px; }
 
         .toolbar input[type="text"],
         .toolbar input[type="number"] {
             padding: 3px 6px;
-            background: #1a1d21;
-            color: #d4d8dd;
-            border: 1px solid #3c4043;
-            border-radius: 4px;
-            font-size: 12px;
+            background: #1a1d21; color: #d4d8dd;
+            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
         }
 
-        .toolbar input[type="text"] {
-            width: 130px;
-        }
-
-        .toolbar input[type="number"] {
-            width: 90px;
-        }
+        .toolbar input[type="text"] { width: 130px; }
+        .toolbar input[type="number"] { width: 90px; }
 
         .toolbar select {
             padding: 3px 6px;
-            background: #1a1d21;
-            color: #d4d8dd;
-            border: 1px solid #3c4043;
-            border-radius: 4px;
-            font-size: 12px;
+            background: #1a1d21; color: #d4d8dd;
+            border: 1px solid #3c4043; border-radius: 4px; font-size: 12px;
             max-width: 220px;
         }
 
         .toolbar button {
             padding: 4px 10px;
-            background: #3d6b4d;
-            color: #e8eaed;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
+            background: #3d6b4d; color: #e8eaed;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
             transition: background 0.15s;
         }
 
-        .toolbar button:hover {
-            background: #4d7c5d;
+        .toolbar button:hover { background: #4d7c5d; }
+
+        .grid-switch {
+            display: flex; align-items: center; gap: 4px;
+            padding: 2px 6px; border: 1px solid #3c4043; border-radius: 4px;
+            background: #1a1d21; cursor: pointer; user-select: none;
+        }
+        .grid-switch input { display: none; }
+        .grid-switch .slider {
+            width: 26px; height: 14px; background: #3c4043;
+            border-radius: 7px; position: relative; transition: 0.2s;
+        }
+        .grid-switch .slider::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 10px; height: 10px; background: #d4d8dd;
+            border-radius: 50%; transition: 0.2s;
+        }
+        .grid-switch input:checked + .slider { background: #3d6b4d; }
+        .grid-switch input:checked + .slider::after { left: 14px; }
+
+        .mode-switch {
+            display: flex; align-items: center; gap: 4px;
+            padding: 2px 6px; border: 1px solid #3c4043; border-radius: 4px;
+            background: #1a1d21; cursor: pointer; user-select: none;
         }
 
-        .status {
-            color: #9aa0a6;
-            margin-left: auto;
-            font-size: 11px;
+        .mode-switch input { display: none; }
+
+        .mode-switch .slider {
+            width: 26px; height: 14px; background: #3c4043;
+            border-radius: 7px; position: relative; transition: 0.2s;
         }
+
+        .mode-switch .slider::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 10px; height: 10px; background: #d4d8dd;
+            border-radius: 50%; transition: 0.2s;
+        }
+
+        .mode-switch input:checked + .slider { background: #3d6b4d; }
+        .mode-switch input:checked + .slider::after { left: 14px; }
+
+        .status { color: #9aa0a6; margin-left: auto; font-size: 11px; }
 
         .stats {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin-bottom: 8px;
-            font-size: 12px;
-            color: #9aa0a6;
+            display: flex; gap: 12px; flex-wrap: wrap;
+            margin-bottom: 8px; font-size: 12px; color: #9aa0a6;
         }
 
-        .stats b {
-            color: #8ab4f8;
-        }
+        .stats b { color: #8ab4f8; }
 
         #main {
-            display: flex;
-            gap: 8px;
-            height: 700px;
+            display: flex; gap: 8px; height: 700px;
         }
 
         #legends {
-            width: 200px;
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            width: 200px; flex-shrink: 0;
+            display: flex; flex-direction: column; gap: 8px;
             overflow-y: auto;
         }
 
         .legend-box {
             background: #25292e;
-            border: 1px solid #3c4043;
-            border-radius: 6px;
+            border: 1px solid #3c4043; border-radius: 6px;
             padding: 8px;
         }
 
         .legend-box h3 {
-            font-size: 12px;
-            color: #8ab4f8;
-            margin-bottom: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
         }
 
         .legend-box h3 button {
-            font-size: 10px;
-            padding: 1px 5px;
-            background: #30343a;
-            color: #9aa0a6;
-            border: 1px solid #3c4043;
-            border-radius: 3px;
-            cursor: pointer;
+            font-size: 10px; padding: 1px 5px;
+            background: #30343a; color: #9aa0a6;
+            border: 1px solid #3c4043; border-radius: 3px; cursor: pointer;
         }
 
-        .legend-box h3 button:hover {
-            background: #3c4043;
-        }
+        .legend-box h3 button:hover { background: #3c4043; }
 
         .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 6px;
-            margin-bottom: 1px;
-            border-radius: 3px;
-            cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            padding: 4px 6px; margin-bottom: 1px;
+            border-radius: 3px; cursor: pointer;
             font-size: 12px;
             border-left: 3px solid transparent;
             user-select: none;
             transition: background 0.1s;
         }
 
-        .legend-item:hover {
-            background: #2f3439;
-        }
+        .legend-item:hover { background: #2f3439; }
 
         .legend-item.active {
-            background: #3d4a5c;
-            border-left-color: #8ab4f8;
+            background: #3d4a5c; border-left-color: #8ab4f8;
         }
 
         .legend-color {
-            width: 12px;
-            height: 12px;
-            border-radius: 2px;
+            width: 12px; height: 12px; border-radius: 2px;
             flex-shrink: 0;
         }
 
         .legend-item .count {
-            margin-left: auto;
-            color: #80868b;
-            font-size: 11px;
+            margin-left: auto; color: #80868b; font-size: 11px;
         }
 
         #canvasWrap {
-            position: relative;
-            flex: 1;
+            position: relative; flex: 1;
             background: #202327;
-            border: 1px solid #3c4043;
-            border-radius: 6px;
-            overflow: hidden;
-            cursor: grab;
+            border: 1px solid #3c4043; border-radius: 6px;
+            overflow: hidden; cursor: grab;
         }
 
-        #canvasWrap.dragging {
-            cursor: grabbing;
-        }
+        #canvasWrap.dragging { cursor: grabbing; }
 
-        canvas {
-            display: block;
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
 
         .hud {
-            position: absolute;
-            top: 8px;
+            position: absolute; top: 8px;
             background: rgba(26, 29, 33, 0.9);
-            border: 1px solid #3c4043;
-            border-radius: 4px;
-            padding: 3px 8px;
-            font-size: 11px;
-            color: #9aa0a6;
+            border: 1px solid #3c4043; border-radius: 4px;
+            padding: 3px 8px; font-size: 11px; color: #9aa0a6;
             pointer-events: none;
         }
 
-        .hud b {
-            color: #8ab4f8;
-        }
+        .hud b { color: #8ab4f8; }
 
-        #coordInfo {
-            left: 8px;
-        }
-
-        #zoomInfo {
-            right: 8px;
-        }
+        #coordInfo { left: 8px; }
+        #zoomInfo { right: 8px; }
 
         #tooltip {
-            position: fixed;
-            pointer-events: none;
+            position: fixed; pointer-events: none;
             background: rgba(26, 29, 33, 0.98);
-            border: 1px solid #5c7a99;
-            border-radius: 5px;
-            padding: 6px 10px;
-            font-size: 11px;
-            color: #d4d8dd;
-            white-space: nowrap;
-            display: none;
-            z-index: 9999;
+            border: 1px solid #5c7a99; border-radius: 5px;
+            padding: 6px 10px; font-size: 11px; color: #d4d8dd;
+            white-space: nowrap; display: none; z-index: 9999;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
             line-height: 1.5;
         }
 
         #listPanel {
-            width: 250px;
-            flex-shrink: 0;
+            width: 250px; flex-shrink: 0;
             background: #25292e;
-            border: 1px solid #3c4043;
-            border-radius: 6px;
-            padding: 8px;
-            overflow-y: auto;
+            border: 1px solid #3c4043; border-radius: 6px;
+            padding: 8px; overflow-y: auto;
             font-size: 12px;
         }
 
         #listPanel h3 {
-            font-size: 12px;
-            color: #8ab4f8;
-            margin-bottom: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            background: #25292e;
-            padding: 2px 0;
-            z-index: 1;
+            font-size: 12px; color: #8ab4f8; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; background: #25292e;
+            padding: 2px 0; z-index: 1;
         }
 
         .vein-item {
-            padding: 4px 6px;
-            margin-bottom: 3px;
-            border-radius: 4px;
-            cursor: pointer;
+            padding: 4px 6px; margin-bottom: 3px;
+            border-radius: 4px; cursor: pointer;
             border-left: 3px solid transparent;
             transition: background 0.1s;
         }
 
-        .vein-item:hover {
-            background: #2f3439;
-        }
+        .vein-item:hover { background: #2f3439; }
 
         .vein-item.active {
-            background: #3d4a5c;
-            border-left-color: #8ab4f8;
+            background: #3d4a5c; border-left-color: #8ab4f8;
         }
 
-        .vein-item .name {
-            color: #d4d8dd;
-            display: flex;
-            justify-content: space-between;
-        }
+        .vein-item .name { color: #d4d8dd; display: flex; justify-content: space-between; }
 
         .vein-item .coord {
-            color: #80868b;
-            font-size: 11px;
-            display: flex;
-            justify-content: space-between;
-            margin-top: 1px;
+            color: #80868b; font-size: 11px;
+            display: flex; justify-content: space-between; margin-top: 1px;
         }
 
-        .vein-item .dist {
-            color: #8ab4f8;
-        }
+        .vein-item .dist { color: #8ab4f8; }
 
-        .vein-item .oil {
-            color: #c9a86a;
-            font-size: 11px;
-            margin-top: 1px;
-        }
+        .vein-item .oil { color: #c9a86a; font-size: 11px; margin-top: 1px; }
 
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: #3c4043;
-            border-radius: 3px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #5f6368;
-        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5f6368; }
     </style>
 </head>
 
@@ -341,17 +240,29 @@
     <h1>IE 矿脉可视化</h1>
 
     <div class="toolbar">
-        <label>存档<input type="file" id="fileInput" accept=".dat"></label>
+        <label class="mode-switch" title="切换数据来源：定时读取 ie_veins.json 或 导入 .dat 文件">
+            <input type="checkbox" id="modeSwitch">
+            <span class="slider"></span>
+            <span id="modeLabel">导入</span>
+        </label>
+        <label id="fileLabel">存档<input type="file" id="fileInput" accept=".dat"></label>
         <label>维度<select id="dimSelect"></select></label>
         <label>基地X<input type="number" id="baseX" value="0" step="16"></label>
         <label>基地Z<input type="number" id="baseZ" value="0" step="16"></label>
         <label>总矿量<input type="number" id="maxYield" value="784000" step="1024"></label>
+        <label id="intervalLabel" style="display:none;">刷新(秒)<input type="number" id="refreshInterval" value="5" min="1" step="1"></label>
         <label>关键词<input type="text" id="keyword" placeholder="坐标或矿物名"></label>
+        <label class="grid-switch" title="显示/隐藏区块网格（每16格）">
+            <input type="checkbox" id="gridSwitch" checked>
+            <span class="slider"></span>
+            <span>网格</span>
+        </label>
         <button id="resetViewBtn">重置视图</button>
         <button id="fitViewBtn">适应窗口</button>
         <button id="goBaseBtn">跳转基地</button>
         <button id="clearFilterBtn">清除筛选</button>
-        <span class="status" id="status">请选择 ImmersiveEngineering-SaveData.dat</span>
+        <button id="manualRefreshBtn" title="立即读取一次 ie_veins.json">手动刷新</button>
+        <span class="status" id="status">请选择 ImmersiveEngineering-SaveData.dat 或切换到定时模式</span>
     </div>
 
     <div class="stats">
@@ -359,6 +270,7 @@
         <span>当前显示<b id="visibleCount">0</b></span>
         <span>当前维度<b id="curDim">-</b></span>
         <span>基地<b id="baseInfo">(0, 0)</b></span>
+        <span id="lastRefreshInfo" style="color:#6e7681;">—</span>
     </div>
 
     <div id="main">
@@ -404,6 +316,11 @@
             '#d2a8ff', '#56d364', '#e3b341', '#ff9a8b', '#bc8cff'
         ];
 
+        const JSON_PATH = 'ie_veins.json';
+        const CHUNK_SIZE = 16;
+        const GRID_MIN_SCALE = 0.15;
+        const LS_KEY = 'ie_veins_ui_state_v1';
+
         // ==================== NBT 解析器 ====================
         class NBTReader {
             constructor(buffer) { this.view = new DataView(buffer); this.pos = 0; }
@@ -412,7 +329,7 @@
             i16() { const v = this.view.getInt16(this.pos); this.pos += 2; return v; }
             u16() { const v = this.view.getUint16(this.pos); this.pos += 2; return v; }
             i32() { const v = this.view.getInt32(this.pos); this.pos += 4; return v; }
-            i64() { const v = this.view.getBigInt64(this.pos); this.pos += 8; return v; }
+            i64() { return this.view.getBigInt64(this.pos); this.pos += 8; return v; }
             f32() { const v = this.view.getFloat32(this.pos); this.pos += 4; return v; }
             f64() { const v = this.view.getFloat64(this.pos); this.pos += 8; return v; }
             str() {
@@ -519,12 +436,37 @@
             return veins;
         }
 
+        function extractVeinsFromJson(json) {
+            const result = { veins: [], maxYield: null };
+            if (!json) return result;
+
+            if (typeof json.mineralVeinYield === 'number' && json.mineralVeinYield > 0) {
+                result.maxYield = json.mineralVeinYield;
+            }
+
+            if (!json.dimensions) return result;
+            for (const [dim, list] of Object.entries(json.dimensions)) {
+                if (!Array.isArray(list)) continue;
+                for (const v of list) {
+                    result.veins.push({
+                        dimension: String(dim),
+                        x: Number(v.x) || 0,
+                        z: Number(v.z) || 0,
+                        radius: Number(v.radius) || 0,
+                        depletion: Number(v.depletion) || 0,
+                        mineral: String(v.mineral || ''),
+                    });
+                }
+            }
+            return result;
+        }
+
         // ==================== 状态 ====================
         const state = {
-            veins: [],            // 全部维度的矿脉
-            visible: [],          // 当前维度 + 筛选后的矿脉
-            dimBounds: {},        // 按维度分别计算边界
-            allDims: [],          // 所有维度 ID 列表
+            veins: [],
+            visible: [],
+            dimBounds: {},
+            allDims: [],
             currentDim: null,
             zoom: 1.0,
             panX: 0,
@@ -544,6 +486,10 @@
             offscreenKey: '',
             reserveCounts: {},
             mineralCounts: {},
+            useAutoRefresh: false,
+            autoRefresh: false,
+            timer: null,
+            showGrid: true,
         };
 
         // ==================== DOM ====================
@@ -559,11 +505,52 @@
         const mineralLegend = $('mineralLegend');
         const dimSelect = $('dimSelect');
 
+        // ==================== UI 状态持久化 ====================
+        function saveUIState() {
+            try {
+                const data = {
+                    useAutoRefresh: state.useAutoRefresh,
+                    refreshInterval: Number($('refreshInterval').value) || 5,
+                    showGrid: state.showGrid,
+                    baseX: state.baseX,
+                    baseZ: state.baseZ,
+                    maxYield: state.maxYield,
+                    keyword: state.keyword,
+                };
+                localStorage.setItem(LS_KEY, JSON.stringify(data));
+            } catch (e) { /* ignore */ }
+        }
+
+        function loadUIState() {
+            try {
+                const raw = localStorage.getItem(LS_KEY);
+                if (!raw) return;
+                const data = JSON.parse(raw);
+                if (typeof data.useAutoRefresh === 'boolean') state.useAutoRefresh = data.useAutoRefresh;
+                if (typeof data.refreshInterval === 'number' && data.refreshInterval > 0) {
+                    $('refreshInterval').value = data.refreshInterval;
+                }
+                if (typeof data.showGrid === 'boolean') state.showGrid = data.showGrid;
+                if (typeof data.baseX === 'number') state.baseX = data.baseX;
+                if (typeof data.baseZ === 'number') state.baseZ = data.baseZ;
+                if (typeof data.maxYield === 'number' && data.maxYield > 0) state.maxYield = data.maxYield;
+                if (typeof data.keyword === 'string') state.keyword = data.keyword;
+            } catch (e) { /* ignore */ }
+        }
+
         // ==================== 工具 ====================
         function setStatus(msg, isError = false) {
             const el = $('status');
             el.textContent = msg;
             el.style.color = isError ? '#f85149' : '#8b949e';
+        }
+
+        function updateLastRefreshTime() {
+            const el = $('lastRefreshInfo');
+            if (el) {
+                el.textContent = `最后刷新: ${new Date().toLocaleTimeString()}`;
+                el.style.color = '#8ab4f8';
+            }
         }
 
         function mineralColor(id) {
@@ -603,6 +590,10 @@
             return n.toLocaleString();
         }
 
+        function veinKey(v) {
+            return `${v.dimension}|${v.x}|${v.z}|${v.mineral}`;
+        }
+
         // ==================== 坐标转换 ====================
         function screenToWorld(screenX, screenY) {
             const bounds = state.dimBounds[state.currentDim];
@@ -631,6 +622,57 @@
             });
         }
 
+        // ==================== 网格绘制 ====================
+        function drawGrid(octx, off, bounds, scale, toScreenX, toScreenY, viewLeft, viewTop, viewRight, viewBottom) {
+            if (!state.showGrid) return;
+            if (scale < GRID_MIN_SCALE) return;
+
+            const spacing = CHUNK_SIZE * scale;
+            if (spacing < 4) return;
+
+            const alpha = Math.min(0.22, spacing / 400);
+
+            const startChunkX = Math.floor(viewLeft / CHUNK_SIZE) * CHUNK_SIZE;
+            const endChunkX = Math.ceil(viewRight / CHUNK_SIZE) * CHUNK_SIZE;
+            const startChunkZ = Math.floor(viewTop / CHUNK_SIZE) * CHUNK_SIZE;
+            const endChunkZ = Math.ceil(viewBottom / CHUNK_SIZE) * CHUNK_SIZE;
+
+            const majorEvery = 5;
+
+            octx.save();
+            octx.lineWidth = 1;
+
+            for (let wx = startChunkX; wx <= endChunkX; wx += CHUNK_SIZE) {
+                const px = toScreenX(wx);
+                if (px < -2 || px > off.w + 2) continue;
+                const chunkIdx = Math.round(wx / CHUNK_SIZE);
+                const isMajor = chunkIdx % majorEvery === 0;
+                octx.strokeStyle = isMajor
+                    ? `rgba(138, 180, 248, ${alpha * 1.8})`
+                    : `rgba(138, 180, 248, ${alpha})`;
+                octx.beginPath();
+                octx.moveTo(Math.round(px) + 0.5, 0);
+                octx.lineTo(Math.round(px) + 0.5, off.h);
+                octx.stroke();
+            }
+
+            for (let wz = startChunkZ; wz <= endChunkZ; wz += CHUNK_SIZE) {
+                const py = toScreenY(wz);
+                if (py < -2 || py > off.h + 2) continue;
+                const chunkIdx = Math.round(wz / CHUNK_SIZE);
+                const isMajor = chunkIdx % majorEvery === 0;
+                octx.strokeStyle = isMajor
+                    ? `rgba(138, 180, 248, ${alpha * 1.8})`
+                    : `rgba(138, 180, 248, ${alpha})`;
+                octx.beginPath();
+                octx.moveTo(0, Math.round(py) + 0.5);
+                octx.lineTo(off.w, Math.round(py) + 0.5);
+                octx.stroke();
+            }
+
+            octx.restore();
+        }
+
         // ==================== 离屏画布 ====================
         function renderOffscreen() {
             if (!state.currentDim) return;
@@ -639,17 +681,16 @@
             const off = getOffscreenSize();
 
             const cacheKey = [
-                state.currentDim,
-                off.w, off.h,
+                state.currentDim, off.w, off.h,
                 state._scale.toFixed(6),
-                state.panX.toFixed(2),
-                state.panY.toFixed(2),
+                state.panX.toFixed(2), state.panY.toFixed(2),
                 Array.from(state.reserveFilter).sort().join(','),
                 Array.from(state.mineralFilter).sort().join(','),
                 state.keyword,
                 state.baseX, state.baseZ,
                 state.maxYield,
                 state.selectedVein ? veinKey(state.selectedVein) : '',
+                state.showGrid ? '1' : '0',
             ].join('|');
 
             if (state.offscreen && !state.offscreenDirty && state.offscreenKey === cacheKey) return;
@@ -674,6 +715,8 @@
 
             const toScreenX = (wx) => (wx - bounds.minX) * scale + state.panX;
             const toScreenY = (wz) => (wz - bounds.minZ) * scale + state.panY;
+
+            drawGrid(octx, off, bounds, scale, toScreenX, toScreenY, viewLeft, viewTop, viewRight, viewBottom);
 
             const viewPad = 200 / scale;
             const minRadiusPx = 2;
@@ -705,7 +748,6 @@
                 octx.stroke();
             }
 
-            // 基地标记
             const bx = toScreenX(state.baseX);
             const by = toScreenY(state.baseZ);
             if (bx > -20 && bx < off.w + 20 && by > -20 && by < off.h + 20) {
@@ -727,7 +769,6 @@
                 octx.restore();
             }
 
-            // 高亮选中
             if (state.selectedVein && state.selectedVein.dimension === state.currentDim) {
                 const v = state.selectedVein;
                 const px = toScreenX(v.x);
@@ -904,7 +945,9 @@
             const sy = e.clientY - rect.top;
             const wp = screenToWorld(sx, sy);
 
-            coordInfo.innerHTML = `方块 <b>${Math.floor(wp.x)}</b>,<b>${Math.floor(wp.z)}</b>`;
+            const chunkX = Math.floor(wp.x / CHUNK_SIZE);
+            const chunkZ = Math.floor(wp.z / CHUNK_SIZE);
+            coordInfo.innerHTML = `方块 <b>${Math.floor(wp.x)}</b>,<b>${Math.floor(wp.z)}</b> · 区块 <b>${chunkX}</b>,<b>${chunkZ}</b>`;
 
             let found = null;
             for (let i = state.visible.length - 1; i >= 0; i--) {
@@ -933,6 +976,7 @@
                 tooltip.innerHTML =
                     `<b style="color:${color}">${mineralLabel(found.mineral)}</b><br>` +
                     `方块 (${found.x}, ${found.z})<br>` +
+                    `区块 (${Math.floor(found.x / CHUNK_SIZE)}, ${Math.floor(found.z / CHUNK_SIZE)})<br>` +
                     `半径：${found.radius}<br>` +
                     `已开采：${formatNumber(found.depletion)}<br>` +
                     `剩余矿量：<b style="color:#d29922">${formatNumber(remaining)}</b><br>` +
@@ -979,10 +1023,6 @@
             updateListPanel();
             const el = document.querySelector(`.vein-item[data-key="${veinKey(vein)}"]`);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-
-        function veinKey(v) {
-            return `${v.dimension}|${v.x}|${v.z}|${v.mineral}`;
         }
 
         // ==================== 列表 ====================
@@ -1082,7 +1122,6 @@
             $('baseInfo').textContent = `(${state.baseX}, ${state.baseZ})`;
         }
 
-        // ==================== 重新计算统计（当前维度） ====================
         function recalcStats() {
             state.reserveCounts = {};
             state.mineralCounts = {};
@@ -1124,7 +1163,110 @@
             updateListPanel();
         }
 
-        // ==================== 加载文件 ====================
+        // ==================== 通用数据应用 ====================
+        function captureViewState() {
+            return {
+                currentDim: state.currentDim,
+                zoom: state._scale,
+                panX: state.panX,
+                panY: state.panY,
+                selectedVein: state.selectedVein,
+                baseX: state.baseX,
+                baseZ: state.baseZ,
+                maxYield: state.maxYield,
+                reserveFilter: new Set(state.reserveFilter),
+                mineralFilter: new Set(state.mineralFilter),
+                keyword: state.keyword,
+            };
+        }
+
+        function rebuildBoundsAndDims() {
+            state.dimBounds = {};
+            state.allDims = [];
+            for (let i = 0; i < state.veins.length; i++) {
+                const v = state.veins[i];
+                if (!state.dimBounds[v.dimension]) {
+                    state.dimBounds[v.dimension] = {
+                        minX: v.x - v.radius, maxX: v.x + v.radius,
+                        minZ: v.z - v.radius, maxZ: v.z + v.radius
+                    };
+                    state.allDims.push(v.dimension);
+                } else {
+                    const b = state.dimBounds[v.dimension];
+                    if (v.x - v.radius < b.minX) b.minX = v.x - v.radius;
+                    if (v.x + v.radius > b.maxX) b.maxX = v.x + v.radius;
+                    if (v.z - v.radius < b.minZ) b.minZ = v.z - v.radius;
+                    if (v.z + v.radius > b.maxZ) b.maxZ = v.z + v.radius;
+                }
+            }
+            state.allDims.sort((a, b) => {
+                if (a === 'minecraft:overworld') return -1;
+                if (b === 'minecraft:overworld') return 1;
+                return a.localeCompare(b);
+            });
+        }
+
+        function applyNewVeins(veins, options = {}) {
+            if (!veins || veins.length === 0) {
+                setStatus('未找到矿脉数据', true);
+                return;
+            }
+
+            const snapshot = captureViewState();
+
+            state.veins = veins;
+            rebuildBoundsAndDims();
+
+            if (!state.dimBounds[state.currentDim] && state.allDims.length > 0) {
+                state.currentDim = state.allDims[0];
+            }
+
+            if (typeof options.maxYield === 'number' && options.maxYield > 0) {
+                state.maxYield = options.maxYield;
+            } else {
+                state.maxYield = snapshot.maxYield;
+            }
+            $('maxYield').value = state.maxYield;
+
+            state.baseX = snapshot.baseX;
+            state.baseZ = snapshot.baseZ;
+            state.reserveFilter = snapshot.reserveFilter;
+            state.mineralFilter = snapshot.mineralFilter;
+            state.keyword = snapshot.keyword;
+            $('baseX').value = state.baseX;
+            $('baseZ').value = state.baseZ;
+            $('keyword').value = state.keyword;
+
+            buildDimSelect();
+            if (state.currentDim) dimSelect.value = state.currentDim;
+
+            if (snapshot.selectedVein) {
+                const key = veinKey(snapshot.selectedVein);
+                state.selectedVein = state.veins.find(v => veinKey(v) === key) || null;
+            } else {
+                state.selectedVein = null;
+            }
+
+            if (snapshot.zoom && state.currentDim === snapshot.currentDim && state.dimBounds[state.currentDim]) {
+                state._scale = snapshot.zoom;
+                state.panX = snapshot.panX;
+                state.panY = snapshot.panY;
+            } else {
+                resetView();
+            }
+
+            recalcStats();
+            buildLegends();
+            applyFilter();
+            updateStats();
+            updateListPanel();
+            state.offscreenDirty = true;
+            scheduleRender();
+
+            if (options.statusMessage) setStatus(options.statusMessage);
+        }
+
+        // ==================== 从文件加载 (.dat) ====================
         function loadFromFile(file) {
             const reader = new FileReader();
             reader.onload = async (ev) => {
@@ -1139,48 +1281,7 @@
                         return;
                     }
 
-                    state.veins = veins;
-                    state.visible = veins;
-                    state.dimBounds = {};
-                    state.allDims = [];
-
-                    // 按维度分别计算边界
-                    for (let i = 0; i < veins.length; i++) {
-                        const v = veins[i];
-                        if (!state.dimBounds[v.dimension]) {
-                            state.dimBounds[v.dimension] = {
-                                minX: v.x - v.radius, maxX: v.x + v.radius,
-                                minZ: v.z - v.radius, maxZ: v.z + v.radius
-                            };
-                            state.allDims.push(v.dimension);
-                        } else {
-                            const b = state.dimBounds[v.dimension];
-                            if (v.x - v.radius < b.minX) b.minX = v.x - v.radius;
-                            if (v.x + v.radius > b.maxX) b.maxX = v.x + v.radius;
-                            if (v.z - v.radius < b.minZ) b.minZ = v.z - v.radius;
-                            if (v.z + v.radius > b.maxZ) b.maxZ = v.z + v.radius;
-                        }
-                    }
-
-                    if (state.allDims.length === 0) { setStatus('数据为空', true); return; }
-
-                    // 按维度排序，主世界优先
-                    state.allDims.sort((a, b) => {
-                        if (a === 'minecraft:overworld') return -1;
-                        if (b === 'minecraft:overworld') return 1;
-                        return a.localeCompare(b);
-                    });
-                    state.currentDim = state.allDims[0];
-
-                    // 构建维度下拉框
-                    buildDimSelect();
-
-                    recalcStats();
-                    resetView();
-                    updateStats();
-                    buildLegends();
-                    updateListPanel();
-
+                    applyNewVeins(veins);
                     const t2 = performance.now();
                     setStatus(`已加载 ${veins.length} 条 · ${state.allDims.length} 个维度 · 解析 ${(t1 - t0).toFixed(0)}ms · 渲染 ${(t2 - t1).toFixed(0)}ms`);
                 } catch (err) {
@@ -1191,7 +1292,77 @@
             reader.readAsArrayBuffer(file);
         }
 
+        // ==================== 从 ie_veins.json 加载 ====================
+        async function loadFromJson(silent = false) {
+            try {
+                const resp = await fetch(JSON_PATH + '?t=' + Date.now());
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const json = await resp.json();
+
+                const { veins, maxYield } = extractVeinsFromJson(json);
+                if (veins.length === 0) {
+                    if (!silent) setStatus('JSON 中未找到矿脉数据', true);
+                    return;
+                }
+
+                applyNewVeins(veins, { maxYield });
+
+                const yieldInfo = (typeof maxYield === 'number' && maxYield > 0)
+                    ? ` · 总矿量 ${maxYield.toLocaleString()}`
+                    : '';
+                setStatus(`已从 JSON 刷新 ${veins.length} 条${yieldInfo} · ${new Date().toLocaleTimeString()}`);
+                updateLastRefreshTime();
+            } catch (err) {
+                setStatus(`JSON 加载失败：${err.message}`, true);
+                console.error(err);
+            }
+        }
+
+        // ==================== 定时刷新 ====================
+        function scheduleNext() {
+            if (!state.autoRefresh || !state.useAutoRefresh) return;
+            const sec = Math.max(1, Number($('refreshInterval').value) || 5);
+            state.timer = setTimeout(async () => {
+                if (!state.useAutoRefresh) return;
+                await loadFromJson(true);
+                scheduleNext();
+            }, sec * 1000);
+        }
+
+        function startAuto() {
+            stopAuto();
+            state.autoRefresh = true;
+            // 立即先加载一次
+            loadFromJson(true).then(() => scheduleNext());
+        }
+
+        function stopAuto() {
+            if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+            state.autoRefresh = false;
+        }
+
         // ==================== 事件 ====================
+        $('modeSwitch').onchange = e => {
+            state.useAutoRefresh = e.target.checked;
+            $('modeLabel').textContent = state.useAutoRefresh ? '定时' : '导入';
+            $('fileLabel').style.display = state.useAutoRefresh ? 'none' : 'inline';
+            $('intervalLabel').style.display = state.useAutoRefresh ? 'inline' : 'none';
+
+            if (state.useAutoRefresh) {
+                startAuto();
+                setStatus('已切换到定时刷新模式，正在读取 ie_veins.json');
+            } else {
+                stopAuto();
+                setStatus('已切换到导入模式，请选择 .dat 文件');
+            }
+            saveUIState();
+        };
+
+        $('refreshInterval').onchange = () => {
+            if (state.useAutoRefresh) startAuto();
+            saveUIState();
+        };
+
         $('fileInput').onchange = e => {
             const file = e.target.files[0];
             if (file) loadFromFile(file);
@@ -1212,23 +1383,27 @@
             $('keyword').value = '';
             applyFilter();
             buildLegends();
+            saveUIState();
         };
 
         $('clearReserveFilter').onclick = () => {
             state.reserveFilter.clear();
             applyFilter();
             buildLegends();
+            saveUIState();
         };
 
         $('clearMineralFilter').onclick = () => {
             state.mineralFilter.clear();
             applyFilter();
             buildLegends();
+            saveUIState();
         };
 
         $('keyword').oninput = () => {
             state.keyword = $('keyword').value;
             applyFilter();
+            saveUIState();
         };
 
         $('baseX').oninput = () => {
@@ -1237,6 +1412,7 @@
             updateListPanel();
             state.offscreenDirty = true;
             scheduleRender();
+            saveUIState();
         };
 
         $('baseZ').oninput = () => {
@@ -1245,6 +1421,7 @@
             updateListPanel();
             state.offscreenDirty = true;
             scheduleRender();
+            saveUIState();
         };
 
         $('maxYield').oninput = () => {
@@ -1256,11 +1433,43 @@
                 updateListPanel();
                 state.offscreenDirty = true;
                 scheduleRender();
+                saveUIState();
             }
         };
 
+        $('gridSwitch').onchange = e => {
+            state.showGrid = e.target.checked;
+            state.offscreenDirty = true;
+            scheduleRender();
+            saveUIState();
+        };
+
+        $('manualRefreshBtn').onclick = () => {
+            loadFromJson(false);
+        };
+
         // ==================== 启动 ====================
-        setStatus('请选择 ImmersiveEngineering-SaveData.dat');
+        // 先加载持久化 UI 状态
+        loadUIState();
+
+        // 应用状态到控件
+        $('modeSwitch').checked = state.useAutoRefresh;
+        $('modeLabel').textContent = state.useAutoRefresh ? '定时' : '导入';
+        $('fileLabel').style.display = state.useAutoRefresh ? 'none' : 'inline';
+        $('intervalLabel').style.display = state.useAutoRefresh ? 'inline' : 'none';
+        $('gridSwitch').checked = state.showGrid;
+        $('baseX').value = state.baseX;
+        $('baseZ').value = state.baseZ;
+        $('maxYield').value = state.maxYield;
+        $('keyword').value = state.keyword;
+
+        // 根据模式启动定时器
+        if (state.useAutoRefresh) {
+            setStatus('定时刷新模式 · 正在读取 ie_veins.json');
+            startAuto();
+        } else {
+            setStatus('导入模式 · 请选择 ImmersiveEngineering-SaveData.dat');
+        }
     </script>
 </body>
 

@@ -1,3 +1,22 @@
+// 脚本名称: 机械动力:柴油动力油田扫描
+// 功能介绍: 在存档中模拟计算柴油动力油田储量，并保存到本地
+// 依赖模组: 宏(jsmacros)、机械动力:柴油动力(Create: Diesel Generators)
+
+const scriptName = 'CreateOilScanner.ToggleScript'
+const mclog = (msg, prefixColor = 0x5, msgColor = 0x7) => {
+    Chat.log(Chat.createTextBuilder()
+        .append("[").withColor(prefixColor)
+        .append(scriptName).withColor(prefixColor)
+        .append("]").withColor(prefixColor)
+        .append(" " + msg).withColor(msgColor).build())
+}
+const isToggle = () => GlobalVars.getBoolean(scriptName)
+const setToggle = (value) => {
+    GlobalVars.putBoolean(scriptName, value)
+    mclog(value ? "启用脚本" : "关闭脚本")
+}
+setToggle(!isToggle())
+
 /** 反射工具 @template T */
 class DeobfRef {
     /** @param {T} v 被反射包装的对象或 Java 类 */
@@ -164,6 +183,8 @@ const ProgressHud = {
     line2: null,
     /** @type {boolean} */
     _positioned: false,
+    /** @type {number} */
+    _latestUpdate: -1,
 
     /** 初始化 HUD @returns {typeof ProgressHud} */
     init() {
@@ -208,11 +229,14 @@ const ProgressHud = {
      * @param {string} msg1 第一行
      * @param {string} [msg2] 第二行
      */
-    update(msg1, msg2) {
-        if (!this.line1) return
-        this.positionBottomLeft()
-        this.line1.setText(msg1)
-        this.line2.setText(msg2 ?? '')
+    update(msg1, msg2, force = false) {
+        if (force || Date.now() - this._latestUpdate > 100) {
+            if (!this.line1) return
+            this.positionBottomLeft()
+            this.line1.setText(msg1)
+            this.line2.setText(msg2 ?? '')
+            this._latestUpdate = Date.now()
+        }
     },
 
     /** 隐藏 HUD */
@@ -400,6 +424,7 @@ const CDGOil = {
      * @returns {number} 储油量 (mB)
      */
     getOilSmart(x, z) {
+        if (!isToggle()) throw new Error('Stop Script')
         const fast = this.getBaseOilAmountFast(x, z)
         if (fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get())
             return fast
@@ -595,7 +620,7 @@ const CDGOil = {
             ? `§a✓ §7缓存§f${cachedCount}`
             : `§7缓存§f${cachedCount} §7剩§f${remain}s`
 
-        ProgressHud.update(line1, line2)
+        ProgressHud.update(line1, line2, ratio == 1)
     },
 
     /**
@@ -625,24 +650,31 @@ const CDGOil = {
 }
 
 // ==================== 使用 ====================
-
-CDGOil.init()
-
-const player = Player.getPlayer()
-const cx = Math.floor(player.getX() / 16)
-const cz = Math.floor(player.getZ() / 16)
-
-/** 最大抽样半径（区块数） */
-const outerRadius = 200
-/** 抽样间隔 */
-const step = 5
-/** 精扫半径（区块数） */
-const innerRadius = 50
-/** 精扫前 N 个最佳点 */
-const topSample = 10
-
-// 抽样 + 精扫
-CDGOil.scanTwoPhase(cx, cz, outerRadius, innerRadius, step, topSample)
-// 纯精扫
-// CDGOil.fineScan(cx, cz, 500)
-Hud.clearDraw2Ds()
+if (isToggle()) {
+    CDGOil.init()
+    
+    const player = Player.getPlayer()
+    const cx = Math.floor(player.getX() / 16)
+    const cz = Math.floor(player.getZ() / 16)
+    
+    /** 最大抽样半径（区块数） */
+    const outerRadius = 200
+    /** 抽样间隔 */
+    const step = 5
+    /** 精扫半径（区块数） */
+    const innerRadius = 50
+    /** 精扫前 N 个最佳点 */
+    const topSample = 10
+    try {
+        // 抽样 + 精扫
+        // CDGOil.scanTwoPhase(cx, cz, outerRadius, innerRadius, step, topSample)
+        // 纯精扫
+        CDGOil.fineScan(cx, cz, 100)
+        // CDGOil.fineScan(-530, 81, 100)
+    } catch {
+        OilStore.save()
+    } finally {
+        Hud.clearDraw2Ds()
+        setToggle(!isToggle())
+    }
+}

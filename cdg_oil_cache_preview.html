@@ -262,6 +262,8 @@
             panY: 0,
             _scale: 1.0,
             infiniteThreshold: 40000000,
+            // 用户是否手动改过无限阈值（改过之后文件不再自动覆盖）
+            infiniteThresholdManuallySet: false,
             highlightInfinite: false,
             keyword: '',
             baseX: 0,
@@ -272,6 +274,7 @@
             useAutoRefresh: false,
             autoRefresh: false,
             timer: null,
+            // cacheData 以 "维度|x z" 为键，便于增量对比
             cacheData: {},
             offscreen: null,
             offscreenW: 0,
@@ -280,6 +283,14 @@
             offscreenKey: '',
             reserveCounts: {},
             statusCounts: {},
+            // 元数据
+            meta: {
+                timestamp: 0,
+                time: '',
+                OIL_CHUNK_INFINITE_THRESHOLD: 0,
+                OIL_CHUNK_THRESHOLD: 0,
+                OIL_CHUNK_SCALE: 0,
+            },
         };
 
         // ==================== DOM ====================
@@ -832,34 +843,81 @@
             });
         }
 
+        // ==================== 新格式解析 ====================
+        /**
+         * 解析新格式缓存，返回 { meta, entries }
+         * entries: [{ key: "维度|x z", dim, x, z, oil }]
+         */
+        function parseCache(raw) {
+            const meta = {
+                timestamp: raw.timestamp || 0,
+                time: raw.time || '',
+                OIL_CHUNK_INFINITE_THRESHOLD: raw.OIL_CHUNK_INFINITE_THRESHOLD || 0,
+                OIL_CHUNK_THRESHOLD: raw.OIL_CHUNK_THRESHOLD || 0,
+                OIL_CHUNK_SCALE: raw.OIL_CHUNK_SCALE || 0,
+            };
+            const entries = [];
+            const dimensions = raw.dimensions || {};
+            for (const dim in dimensions) {
+                const chunkMap = dimensions[dim];
+                for (const coord in chunkMap) {
+                    const oil = chunkMap[coord];
+                    if (typeof oil !== 'number') continue;
+                    const [x, z] = coord.split(' ').map(Number);
+                    if (isNaN(x) || isNaN(z)) continue;
+                    entries.push({
+                        key: `${dim}|${coord}`,
+                        dim, x, z, oil,
+                    });
+                }
+            }
+            return { meta, entries };
+        }
+
+        /**
+         * 用文件里的 OIL_CHUNK_INFINITE_THRESHOLD 自动适配无限阈值
+         * 若用户手动改过阈值（infiniteThresholdManuallySet），则不覆盖
+         */
+        function autoAdaptThreshold(meta) {
+            if (state.infiniteThresholdManuallySet) return false;
+            if (!meta.OIL_CHUNK_INFINITE_THRESHOLD || meta.OIL_CHUNK_INFINITE_THRESHOLD <= 0) return false;
+            if (meta.OIL_CHUNK_INFINITE_THRESHOLD === state.infiniteThreshold) return false;
+            state.infiniteThreshold = meta.OIL_CHUNK_INFINITE_THRESHOLD;
+            $('infiniteThreshold').value = meta.OIL_CHUNK_INFINITE_THRESHOLD;
+            return true;
+        }
+
         // ==================== 定时加载 ====================
         async function loadCache() {
             try {
                 const resp = await fetch(CACHE_PATH + '?t=' + Date.now());
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const data = await resp.json();
+                const raw = await resp.json();
+
+                const { meta, entries } = parseCache(raw);
+
+                // 刷新元数据
+                state.meta = meta;
+
+                // 自动适配无限阈值
+                const thresholdChanged = autoAdaptThreshold(meta);
 
                 let newCount = 0;
                 let changed = false;
 
-                for (const key in data) {
-                    if (state.cacheData[key] !== data[key]) {
-                        state.cacheData[key] = data[key];
-                        const [dim, coord] = key.split('|');
-                        if (!coord) continue;
-                        const [x, z] = coord.split(' ').map(Number);
-                        if (isNaN(x) || isNaN(z)) continue;
-
-                        const b = { dim, x, z, oil: data[key] };
+                for (const e of entries) {
+                    if (state.cacheData[e.key] !== e.oil) {
+                        state.cacheData[e.key] = e.oil;
+                        const b = { dim: e.dim, x: e.x, z: e.z, oil: e.oil };
                         state.blocks.push(b);
-                        state.blockMap.set(key, b);
+                        state.blockMap.set(e.key, b);
                         updateBounds(b);
                         changed = true;
                         newCount++;
                     }
                 }
 
-                if (!changed) {
+                if (!changed && !thresholdChanged) {
                     setStatus(`已刷新 ${new Date().toLocaleTimeString()} · ${state.blocks.length} 条（无变化）`);
                     return;
                 }
@@ -878,7 +936,9 @@
                 updateStats();
                 updateListPanel();
                 scheduleRender();
-                setStatus(`已刷新 ${new Date().toLocaleTimeString()} · ${state.blocks.length} 条（+${newCount}）`);
+
+                const thInfo = thresholdChanged ? ` · 阈值→${state.infiniteThreshold}` : '';
+                setStatus(`已刷新 ${new Date().toLocaleTimeString()} · ${state.blocks.length} 条（+${newCount}）${thInfo}`);
             } catch (err) {
                 setStatus(`失败：${err.message}`, true);
             }
@@ -921,7 +981,8 @@
             const reader = new FileReader();
             reader.onload = (ev) => {
                 try {
-                    const data = JSON.parse(ev.target.result);
+                    const raw = JSON.parse(ev.target.result);
+                    const { meta, entries } = parseCache(raw);
 
                     state.blocks = [];
                     state.blockMap.clear();
@@ -929,19 +990,16 @@
                     state.currentDim = null;
                     state.cacheData = {};
                     state.selectedKey = null;
+                    state.meta = meta;
 
-                    for (const key in data) {
-                        const oil = data[key];
-                        if (typeof oil !== 'number') continue;
-                        const [dim, coord] = key.split('|');
-                        if (!coord) continue;
-                        const [x, z] = coord.split(' ').map(Number);
-                        if (isNaN(x) || isNaN(z)) continue;
+                    // 自动适配无限阈值（用户未手动改过时）
+                    const thresholdChanged = autoAdaptThreshold(meta);
 
-                        const b = { dim, x, z, oil };
+                    for (const e of entries) {
+                        const b = { dim: e.dim, x: e.x, z: e.z, oil: e.oil };
                         state.blocks.push(b);
-                        state.blockMap.set(key, b);
-                        state.cacheData[key] = oil;
+                        state.blockMap.set(e.key, b);
+                        state.cacheData[e.key] = e.oil;
                         updateBounds(b);
                     }
 
@@ -960,7 +1018,12 @@
                     updateStats();
                     updateListPanel();
                     scheduleRender();
-                    setStatus(`已加载 ${file.name} · ${state.blocks.length} 条`);
+
+                    const metaInfo = meta.time
+                        ? ` · 导出时间 ${new Date(meta.time).toLocaleString()}`
+                        : '';
+                    const thInfo = thresholdChanged ? ` · 阈值→${state.infiniteThreshold}` : '';
+                    setStatus(`已加载 ${file.name} · ${state.blocks.length} 条${metaInfo}${thInfo}`);
                 } catch (err) {
                     setStatus(`解析失败：${err.message}`, true);
                 }
@@ -1021,6 +1084,8 @@
 
         $('infiniteThreshold').onchange = () => {
             state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
+            // 用户手动改过，之后不再被文件自动覆盖
+            state.infiniteThresholdManuallySet = true;
             recalcStats();
             buildLegends();
             applyFilter();
@@ -1063,6 +1128,7 @@
 
         // ==================== 启动 ====================
         state.infiniteThreshold = Number($('infiniteThreshold').value) || 40000000;
+        state.infiniteThresholdManuallySet = false;
         state.useAutoRefresh = false;
         $('modeSwitch').checked = false;
         $('modeLabel').textContent = '导入';

@@ -252,22 +252,59 @@ const ProgressHud = {
  * 油田缓存存储
  * @typedef {Object} OilStoreType
  * @property {string} path 缓存文件路径
- * @property {Object<string, number>} data 缓存数据，key = "维度|x z"
+ * @property {Object} data 缓存数据，结构：
+ *   {
+ *     timestamp: number,
+ *     time: string,
+ *     OIL_CHUNK_INFINITE_THRESHOLD: number,
+ *     OIL_CHUNK_THRESHOLD: number,
+ *     OIL_CHUNK_SCALE: number,
+ *     dimensions: { [dim: string]: { 'x z': number } }
+ *   }
  */
 const OilStore = {
     /** @type {string} */
     path: 'cdg_oil_cache.json',
-    /** @type {Object<string, number>} */
-    data: {},
+    /** @type {Object} */
+    data: {
+        timestamp: 0,
+        time: '',
+        OIL_CHUNK_INFINITE_THRESHOLD: 0,
+        OIL_CHUNK_THRESHOLD: 0,
+        OIL_CHUNK_SCALE: 0,
+        dimensions: {}
+    },
 
     /** 加载缓存文件 @returns {typeof OilStore} */
     load() {
         if (!FS.exists(this.path)) {
-            this.data = {}
+            this.data = {
+                timestamp: Date.now(),
+                time: new Date().toISOString(),
+                OIL_CHUNK_INFINITE_THRESHOLD: CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get(),
+                OIL_CHUNK_THRESHOLD: CDGConfig.OIL_CHUNK_THRESHOLD.get(),
+                OIL_CHUNK_SCALE: CDGConfig.OIL_CHUNK_SCALE.get(),
+                dimensions: {}
+            }
             this.save()
             return this
         }
-        this.data = JSON.parse(FS.open(this.path).read())
+        try {
+            const raw = JSON.parse(FS.open(this.path).read())
+            // 确保 dimensions 存在
+            if (!raw.dimensions) raw.dimensions = {}
+            this.data = raw
+        } catch (e) {
+            this.data = {
+                timestamp: Date.now(),
+                time: new Date().toISOString(),
+                OIL_CHUNK_INFINITE_THRESHOLD: CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get(),
+                OIL_CHUNK_THRESHOLD: CDGConfig.OIL_CHUNK_THRESHOLD.get(),
+                OIL_CHUNK_SCALE: CDGConfig.OIL_CHUNK_SCALE.get(),
+                dimensions: {}
+            }
+            this.save()
+        }
         return this
     },
 
@@ -277,13 +314,13 @@ const OilStore = {
     },
 
     /**
-     * 生成缓存键
+     * 生成缓存键（区块坐标）
      * @param {number} x 区块 X
      * @param {number} z 区块 Z
-     * @returns {string} "维度|x z"
+     * @returns {string} "x z"
      */
     key(x, z) {
-        return `${this.getDimension()}|${x} ${z}`
+        return `${x} ${z}`
     },
 
     /**
@@ -293,7 +330,8 @@ const OilStore = {
      * @returns {boolean}
      */
     has(x, z) {
-        return this.key(x, z) in this.data
+        const dim = this.getDimension()
+        return !!(this.data.dimensions[dim] && this.key(x, z) in this.data.dimensions[dim])
     },
 
     /**
@@ -303,7 +341,8 @@ const OilStore = {
      * @returns {number|undefined}
      */
     get(x, z) {
-        return this.data[this.key(x, z)]
+        const dim = this.getDimension()
+        return this.data.dimensions[dim]?.[this.key(x, z)]
     },
 
     /**
@@ -313,12 +352,19 @@ const OilStore = {
      * @param {number} oil 油量
      */
     set(x, z, oil) {
-        this.data[this.key(x, z)] = oil
+        const dim = this.getDimension()
+        if (!this.data.dimensions[dim]) this.data.dimensions[dim] = {}
+        this.data.dimensions[dim][this.key(x, z)] = oil
     },
 
     /** 写入缓存文件 */
     save() {
-        FS.open(this.path).write(JSON.stringify(this.data))
+        this.data.timestamp = Date.now()
+        this.data.time = new Date().toISOString()
+        this.data.OIL_CHUNK_INFINITE_THRESHOLD = CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()
+        this.data.OIL_CHUNK_THRESHOLD = CDGConfig.OIL_CHUNK_THRESHOLD.get()
+        this.data.OIL_CHUNK_SCALE = CDGConfig.OIL_CHUNK_SCALE.get()
+        FS.open(this.path).write(JSON.stringify(this.data, null, 4))
     }
 }
 
@@ -424,7 +470,7 @@ const CDGOil = {
      * @returns {number} 储油量 (mB)
      */
     getOilSmart(x, z) {
-        if (!isToggle()) throw new Error('Stop Script')
+        if (!isToggle()) throw new Error('StopScript')
         const fast = this.getBaseOilAmountFast(x, z)
         if (fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get())
             return fast
@@ -472,6 +518,7 @@ const CDGOil = {
                 this.renderProgress(done, total, 1, cachedCount, startTime)
                 OilStore.save()
             }
+            Client.waitTick()
         }
 
         hits.sort((a, b) => b.oil - a.oil)
@@ -513,6 +560,7 @@ const CDGOil = {
                 done++
                 this.renderProgress(done, total, 2, cachedCount, startTime)
             })
+            Client.waitTick()
         }
 
         this.renderProgress(done, total, 2, cachedCount, startTime, true)
@@ -632,19 +680,21 @@ const CDGOil = {
     topOil(n = 5, minOil = 0) {
         /** @type {{dim: string, x: number, z: number, oil: number}[]} */
         const list = []
-        for (const key in OilStore.data) {
-            const oil = OilStore.data[key]
-            if (oil <= minOil) continue
-            const [dim, coord] = key.split('|')
-            const [x, z] = coord.split(' ').map(Number)
-            list.push({ dim, x, z, oil })
+        for (const dim in OilStore.data.dimensions) {
+            const chunkMap = OilStore.data.dimensions[dim]
+            for (const key in chunkMap) {
+                const oil = chunkMap[key]
+                if (oil <= minOil) continue
+                const [x, z] = key.split(' ').map(Number)
+                list.push({ dim, x, z, oil })
+            }
         }
         return list.sort((a, b) => b.oil - a.oil).slice(0, n)
     },
 
     /** 清空缓存 */
     clear() {
-        OilStore.data = {}
+        OilStore.data.dimensions = {}
         OilStore.save()
     }
 }
@@ -669,12 +719,15 @@ if (isToggle()) {
         // 抽样 + 精扫
         // CDGOil.scanTwoPhase(cx, cz, outerRadius, innerRadius, step, topSample)
         // 纯精扫
-        CDGOil.fineScan(cx, cz, 100)
+        CDGOil.fineScan(cx, cz, 200)
         // CDGOil.fineScan(-530, 81, 100)
-    } catch {
+    } catch (e) {
         OilStore.save()
+        if (e != 'Error: StopScript')
+            setToggle(false)
     } finally {
+        if (isToggle())
+            setToggle(false)
         Hud.clearDraw2Ds()
-        setToggle(!isToggle())
     }
 }

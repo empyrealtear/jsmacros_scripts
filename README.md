@@ -2,11 +2,17 @@
 
 - 描述：为minecraft游戏jsmacros模组（以下简称jsm）编写的脚本
 
+## 模组信息
+
+- [JS Macros](https://www.mcmod.cn/class/10531.html)
+- [JS Macros CE 社区版](https://modrinth.com/mod/jsmacrosce)
+- [JS Macros Reloaded 重制版](https://modrinth.com/mod/jsmacros-reloaded)
+
 ## 模组文档
 
 - [JS Macros官方版文档](https://jsmacros.wagyourtail.xyz)
 - [JS Macros社区版文档](https://jsmacrosce.com)
-- [JS Macros群友版文档](https://jsmacros.mynotes.world)
+- [JS Macros群友版文档](https://jsmacros.mynotes.world)、[快速开始](https://jsmacros.mynotes.world/quick_start/#_6)
 
 ## 脚本清单
 

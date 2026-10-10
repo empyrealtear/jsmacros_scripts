@@ -3,6 +3,7 @@
 // 依赖模组: jsmacros、Xaero地图(Xaero's World Map)、失落城市雷达(LostRadar)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 自动记录停留过的建筑区块，允许添加为常驻服务脚本，修复未正确获取维度名
+// 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
 
 const scriptName = 'XareoMap_LostRadar.ToggleScript'
 /** 已去过区块的存储路径 */
@@ -48,10 +49,10 @@ const setToggle = (v) => {
  * }} handle_screenCallback
  */
 
-/** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
-const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
 /** @type {JavaClass<ChunkPos>} */
 const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
+/** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
+const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
 
 /** 反射工具 @template T */
 class DeobfRef {
@@ -226,7 +227,7 @@ class Draw2DUtils {
                 dcref.invoke(on, x | 0, y | 0, (x + width) | 0, (y + height) | 0)
                 let result = proxyRef.parent(args)
                 dcref.invoke(off)
-                onrender && onrender(...args)
+                try { onrender && onrender(...args) } catch { }
                 return result
             }))
             let proxy = builder.buildInstance([])
@@ -589,6 +590,33 @@ class EventBus {
     }
 }
 
+class DCAdvancement {
+    constructor() {
+        this.map = {}
+        this.loads()
+    }
+
+    loads() {
+        for (let v of Player.getPlayer().getAdvancementManager().getAdvancementsForIdentifiers().keySet()) {
+            if (v.startsWith('deceasedcraft:')) {
+                this.map[v.replace(/\:.*\//, ':')] = v
+            }
+        }
+    }
+
+    isDone(buildid) {
+        this.loads()
+        let id = this.map[`${buildid}`.split('/')[0]]
+        return id && Player.getPlayer().getAdvancementManager().getAdvancementProgress(id).isDone()
+    }
+
+    getCityStyle(buildid) {
+        this.loads()
+        let id = this.map[`${buildid}`.split('/')[0]]
+        return id ? Chat.createTextHelperFromTranslationKey(`deceasedcraft.advancement.title.${id.split('/')[1]}`).getString() : null
+    }
+}
+
 // ==================== 已去过区块存储 ====================
 
 /**
@@ -618,9 +646,7 @@ function loadVisited() {
     return visited_cache
 }
 
-/**
- * 保存已去过记录到本地文件
- */
+/** 保存已去过记录到本地文件 */
 function saveVisited() {
     if (!visited_cache) return
     try {
@@ -696,30 +722,32 @@ function buildRadarTooltip(entry, cx, cz, dim) {
 
     lines.push(`§e${name} §7(${entry.name()})`)
     lines.push(`§7区块: §f${cx}, ${cz}`)
-    // lines.push(`§7方块: §f${cx * 16}, ${cz * 16}`)
-    // lines.push(`§7颜色: §f#${entry.color().toString(16).padStart(6, '0')}`)
-    lines.push(`§7扫描消耗: §f${entry.usage()}`)
+
+    const buildings = Array.from(entry.buildings())
+    if (buildings.length > 0) {
+        lines.push(`§7收集：${adv.isDone(buildings[0]) ? '已注册' : '未注册'}`)
+        let citystyle = adv.getCityStyle(buildings[0])
+        if (citystyle)
+            lines.push(`§7区域: ${citystyle}`)
+        // lines.push(`§7建筑:`)
+        // const max = 8
+        // for (let i = 0; i < Math.min(buildings.length, max); i++) {
+        //     lines.push(`§8  - §f${buildings[i]}`)
+        // }
+        // if (buildings.length > max) {
+        //     lines.push(`§8  ... 还有 ${buildings.length - max} 个`)
+        // }
+    }
 
     // ---- 已去过标记 ----
     const visitedTime = getVisitedTime(dim, `${cx},${cz}`)
     if (visitedTime != null) {
         const timeStr = new Date(visitedTime).toLocaleString()
-        lines.push(`§a✔ 已去过 §7(${timeStr}) §8Shift+左键取消`)
+        lines.push(`§a✔ 已去过 §7(${timeStr})`)
+        lines.push(`§8Shift+左键取消`)
     } else {
-        lines.push(`§7Shift+左键标记为已去过`)
+        lines.push(`§8Shift+左键标记`)
     }
-
-    // const buildings = Array.from(entry.buildings())
-    // if (buildings.length > 0) {
-    //     lines.push(`§7建筑:`)
-    //     const max = 8
-    //     for (let i = 0; i < Math.min(buildings.length, max); i++) {
-    //         lines.push(`§8  - §f${buildings[i]}`)
-    //     }
-    //     if (buildings.length > max) {
-    //         lines.push(`§8  ... 还有 ${buildings.length - max} 个`)
-    //     }
-    // }
 
     return lines
 }
@@ -788,7 +816,6 @@ function main() {
                         radar_d2d.tooltips = [
                             `§a✔ 已去过 §7(${timeStr})`,
                             `§7区块: §f${cx}, ${cz}`,
-                            // `§7方块: §f${cx * 16}, ${cz * 16}`,
                             `§8Shift+左键取消标记`,
                         ]
                     }
@@ -807,6 +834,7 @@ try {
 }
 
 const bus = new EventBus()
+const adv = new DCAdvancement()
 /** @type {string|null} filter_listener 监听 id */
 let filter_listener = null
 /** @type {string|null} 上次记录的玩家所在区块 key（自动记录用） */
@@ -815,29 +843,28 @@ let last_player_key = null
 if (isToggle()) {
     bus.start()
     main()
+
+
     while (isToggle()) {
         // ---- 自动记录玩家停留过的有建筑区块（独立于地图打开状态） ----
-        const playerKey = getPlayerChunkKey()
+        let playerKey = getPlayerChunkKey()
         if (playerKey != null && playerKey !== last_player_key) {
             last_player_key = playerKey
-            const dim = World.getDimension()
-            // 尚未记录时才检查
-            if (getVisitedTime(dim, playerKey) == null) {
-                let shouldRecord = false
-                const parts = playerKey.split(',')
-                const entry = ClientMapData.getPaletteEntry(
-                    getClientLevel(),
-                    new ChunkPos(parseInt(parts[0], 10), parseInt(parts[1], 10))
-                )
-                if (entry != null) {
-                    const buildings = Array.from(entry.buildings())
-                    shouldRecord = buildings.length > 0
-                }
-
-                if (shouldRecord) {
+            let dim = World.getDimension()
+            let parts = playerKey.split(',')
+            let entry = ClientMapData.getPaletteEntry(
+                getClientLevel(),
+                new ChunkPos(parseInt(parts[0], 10), parseInt(parts[1], 10))
+            )
+            let buildings = entry ? Array.from(entry.buildings()) : []
+            if (buildings.length > 0) {
+                if (getVisitedTime(dim, playerKey) == null) {
                     toggleVisited(dim, playerKey)
                     Chat.actionbar(`添加记录 §a${playerKey}`)
                 }
+
+                if (!adv.isDone(buildings[0]))
+                    mclog('此建筑尚未注册')
             }
         }
 

@@ -605,13 +605,11 @@ class DCAdvancement {
     }
 
     isDone(buildid) {
-        this.loads()
         let id = this.map[`${buildid}`.split('/')[0]]
         return id && Player.getPlayer().getAdvancementManager().getAdvancementProgress(id).isDone()
     }
 
     getCityStyle(buildid) {
-        this.loads()
         let id = this.map[`${buildid}`.split('/')[0]]
         return id ? Chat.createTextHelperFromTranslationKey(`deceasedcraft.advancement.title.${id.split('/')[1]}`).getString() : null
     }
@@ -758,6 +756,7 @@ function main() {
     screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
         const screen = Hud.getOpenScreen()
         bus.remove(filter_listener)
+        adv.loads()
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
 
             const guimap = new GuiMap(screen)
@@ -863,6 +862,7 @@ if (isToggle()) {
                     Chat.actionbar(`添加记录 §a${playerKey}`)
                 }
 
+                adv.loads()
                 if (!adv.isDone(buildings[0]))
                     mclog('此建筑尚未注册')
             }

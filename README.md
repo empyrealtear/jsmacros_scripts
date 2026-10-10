@@ -23,5 +23,6 @@
 - 潮汐自动钓鱼: [TideFishMinigame.ts](./TideFishMinigame.ts)
 - 机动柴油动力油田扫描: [CreateOilScaner.js](./CreateOilScaner.js)、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/柴油动力油田预览.html)
 - 沉浸工程矿脉预览: [XareoMap_IEVeins.js](./XareoMap_IEVeins.js)、[沉浸工程矿脉预览(网页版)](https://empyrealtear.github.io/jsmacros_scripts/沉浸工程矿脉预览.html)
+- 失落城市地图雷达: [XareoMap_LostRadar.js](./XareoMap_LostRadar.js)
 - 星露谷插件自动钓鱼: [CustomFishing.ts](./CustomFishing.ts)、[ResourceParse_CustomFishing.ts](./ResourceParse_CustomFishing.ts)
 - 反混淆映射表反射法: [DeobfReflect.ts](./DeobfReflect.ts)

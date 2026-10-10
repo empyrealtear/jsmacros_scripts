@@ -593,7 +593,6 @@ class EventBus {
 class DCAdvancement {
     constructor() {
         this.map = {}
-        this.loads()
     }
 
     loads() {
@@ -723,7 +722,7 @@ function buildRadarTooltip(entry, cx, cz, dim) {
 
     const buildings = Array.from(entry.buildings())
     if (buildings.length > 0) {
-        lines.push(`§7收集：${adv.isDone(buildings[0]) ? '已注册' : '未注册'}`)
+        lines.push(`§7收集: ${adv.isDone(buildings[0]) ? '已注册' : '未注册'}`)
         let citystyle = adv.getCityStyle(buildings[0])
         if (citystyle)
             lines.push(`§7区域: ${citystyle}`)
@@ -756,9 +755,9 @@ function main() {
     screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
         const screen = Hud.getOpenScreen()
         bus.remove(filter_listener)
-        adv.loads()
+        
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
-
+            adv.loads()
             const guimap = new GuiMap(screen)
             const region = { x: 0, y: 0, width: 0, height: 0 }
             Client.runOnMainThread(JavaWrapper.methodToJava(() => {
@@ -842,7 +841,6 @@ let last_player_key = null
 if (isToggle()) {
     bus.start()
     main()
-
 
     while (isToggle()) {
         // ---- 自动记录玩家停留过的有建筑区块（独立于地图打开状态） ----

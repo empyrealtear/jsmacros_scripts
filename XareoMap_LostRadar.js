@@ -1,33 +1,22 @@
 // 脚本名称: 失落城市雷达数据
-// 功能介绍: 在Xaero世界地图上显示失落城市雷达数据（鼠标悬停区块显示tooltip，Shift+左键标记已去过，自动记录有建筑的区块）
+// 功能介绍: 在Xaero世界地图上显示失落城市雷达数据（鼠标悬停区块显示tooltip，Shift+左键标记已去过，自动记录有建筑的区块，H键切换标记渲染）
 // 依赖模组: jsmacros、Xaero地图(Xaero's World Map)、失落城市雷达(LostRadar)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 自动记录停留过的建筑区块，允许添加为常驻服务脚本，修复未正确获取维度名
 // 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
+// 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，标记状态存储文件名按存档区分，若已使用需要手动迁移
 
 const scriptName = 'XareoMap_LostRadar.ToggleScript'
 /** 已去过区块的存储路径 */
-const VISITED_PATH = 'lostradar_visited.json'
+const VISITED_PATH = () => `lostradar_visited_${World.getWorldIdentifier()}.json`
+/** 渲染半径（区块） */
+const MARKER_RADIUS = 6
 
-/**
- * 输出带脚本名前缀的聊天日志
- * @param {string} msg 日志内容
- * @param {number} [color=0x7] 文本颜色
- */
 const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
     .append("[").withColor(0x5).append(scriptName).withColor(0x5)
     .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
-
-/** @returns {boolean} 脚本是否处于启用状态 */
 const isToggle = () => GlobalVars.getBoolean(scriptName)
-/**
- * 设置脚本启用状态
- * @param {boolean} v
- */
-const setToggle = (v) => {
-    GlobalVars.putBoolean(scriptName, v)
-    mclog(v ? "启用" : "关闭")
-}
+const setToggle = (v) => { GlobalVars.putBoolean(scriptName, v); mclog(v ? "启用" : "关闭") }
 
 /** 
  * @typedef {com.mojang.blaze3d.platform.Window} Window
@@ -53,6 +42,23 @@ const setToggle = (v) => {
 const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
 /** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
 const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
+
+/** @returns {ClientLevel} 主世界 ClientLevel */
+function getClientLevel() {
+    const mc = Client.getMinecraft()
+    return new DeobfRef(mc).get('level', 'field_1687', 'world', 'f_91073_')
+}
+
+/**
+ * 获取玩家当前所在区块 key
+ * @returns {string|null} "cx,cz"；玩家不存在返回 null
+ */
+function getPlayerChunkKey() {
+    const player = Player.getPlayer()
+    if (!player) return null
+    const chunk = player.getChunk()
+    return `${chunk.getChunkX()},${chunk.getChunkZ()}`
+}
 
 /** 反射工具 @template T */
 class DeobfRef {
@@ -396,12 +402,6 @@ class GuiMap {
     isInBounds(x, y) { return x > 0 && y > 0 && x < this.width && y < this.height }
 }
 
-/** @returns {ClientLevel} 主世界 ClientLevel */
-function getClientLevel() {
-    const mc = Client.getMinecraft()
-    return new DeobfRef(mc).get('level', 'field_1687', 'world', 'f_91073_')
-}
-
 /** 事件 */
 class Event {
     /** @constant @type {number} 判定属于拖拽的鼠标最短拖拽距离 */
@@ -416,6 +416,8 @@ class Event {
     static MIDCLICK = 'key.mouse.middle'
     /** @constant @type {Key} 左 Shift */
     static SHIFT = 'key.keyboard.left.shift'
+    /** @constant @type {Key} H 键 */
+    static KEY_H = 'key.keyboard.h'
 
     /** @type {Record<Key,eventCache>} */
     static cache = {}
@@ -569,157 +571,302 @@ class EventBus {
     }
 }
 
+/** 进度查询 */
 class DCAdvancement {
-    constructor() {
-        this.map = {}
-    }
+    constructor() { this.map = {} }
 
     loads() {
-        for (let v of Player.getPlayer().getAdvancementManager().getAdvancementsForIdentifiers().keySet()) {
-            if (v.startsWith('deceasedcraft:')) {
+        for (let v of Player.getPlayer().getAdvancementManager().getAdvancementsForIdentifiers().keySet())
+            if (v.startsWith('deceasedcraft:'))
                 this.map[v.replace(/\:.*\//, ':')] = v
-            }
-        }
     }
 
     isDone(buildid) {
         let id = this.map[`${buildid}`.split('/')[0]]
         return id && Player.getPlayer().getAdvancementManager().getAdvancementProgress(id).isDone()
     }
-
-    getCityStyle(buildid) {
-        let id = this.map[`${buildid}`.split('/')[0]]
-        return id ? Chat.createTextHelperFromTranslationKey(`deceasedcraft.advancement.title.${id.split('/')[1]}`).getString() : null
-    }
 }
 
-// ==================== 已去过区块存储 ====================
+/** @typedef {{color:number, texture:CustomImage|null}} MarkerStateDef 标记状态定义 */ 
+/** 标记状态（附带纹理初始化） */
+const MarkerState = {
+    /** 未注册 + 未去过（红） */
+    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null },
+    /** 未注册 + 已去过（橙） */
+    UNREGISTERED_VISITED:   { color: 0xFF8844, texture: null },
+    /** 已注册 + 未去过（黄） */
+    REGISTERED_UNVISITED:   { color: 0xFFFF44, texture: null },
+    /** 已注册 + 已去过（绿） */
+    REGISTERED_VISITED:     { color: 0x44FF44, texture: null },
 
-/**
- * 已去过记录的内存缓存
- * @type {Object<string, Object<string, number>>|null} 维度 → { 区块key: 时间戳 }
- */
-let visited_cache = null
-
-/**
- * 从本地文件加载已去过记录
- * @returns {Object<string, Object<string, number>>}
- */
-function loadVisited() {
-    if (visited_cache) return visited_cache
-    visited_cache = {}
-    try {
-        if (FS.exists(VISITED_PATH)) {
-            const raw = FS.open(VISITED_PATH).read()
-            if (raw && raw.length > 0) {
-                visited_cache = JSON.parse(raw)
+    /** 预创建所有标记纹理 */
+    initTextures() {
+        for (const [name, state] of Object.entries(this)) {
+            if (typeof state !== 'object' || !('color' in state)) continue
+            try {
+                state.texture = Hud.createTexture(16, 16, `lostradar_marker_${name}`)
+                    .setGraphicsColor(state.color).drawRect(0, 0, 15, 15).update()
+            } catch (e) {
+                Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
             }
         }
-    } catch (e) {
-        Chat.log(`§c[雷达] 加载已去过记录失败: ${e}`)
-        visited_cache = {}
-    }
-    return visited_cache
-}
-
-/** 保存已去过记录到本地文件 */
-function saveVisited() {
-    if (!visited_cache) return
-    try {
-        const dir = VISITED_PATH.substring(0, VISITED_PATH.lastIndexOf('/'))
-        if (!FS.exists(dir)) FS.open(dir).mkdir()
-        FS.open(VISITED_PATH).write(JSON.stringify(visited_cache, null, 4))
-    } catch (e) {
-        Chat.log(`§c[雷达] 保存已去过记录失败: ${e}`)
     }
 }
 
-/**
- * 获取某维度某区块的记录时间戳
- * @param {string} dim 维度 id
- * @param {string} chunkKey "cx,cz"
- * @returns {number|null} 时间戳；未记录返回 null
- */
-function getVisitedTime(dim, chunkKey) {
-    const cache = loadVisited()
-    return cache[dim]?.[chunkKey] ?? null
-}
-
-/**
- * 切换某维度某区块的已去过状态
- * @param {string} dim 维度 id
- * @param {string} chunkKey "cx,cz"
- * @returns {boolean} 切换后的状态（true=已记录）
- */
-function toggleVisited(dim, chunkKey) {
-    const cache = loadVisited()
-    if (!cache[dim]) cache[dim] = {}
-
-    let now
-    if (cache[dim][chunkKey] !== undefined) {
-        delete cache[dim][chunkKey]
-        now = false
-    } else {
-        cache[dim][chunkKey] = Date.now()
-        now = true
-    }
-    saveVisited()
-    return now
-}
-
-/**
- * 获取玩家当前所在区块 key
- * @returns {string|null} "cx,cz"；玩家不存在返回 null
- */
-function getPlayerChunkKey() {
-    const player = Player.getPlayer()
-    if (!player) return null
-    const chunk = player.getChunk()
-    return `${chunk.getChunkX()},${chunk.getChunkZ()}`
-}
-
-/**
- * 把 PaletteEntry + 区块坐标 格式化为 tooltip 行
- * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
- * @param {number} cx
- * @param {number} cz
- * @param {string} dim 维度 id
- * @returns {string[]}
- */
-function buildRadarTooltip(entry, cx, cz, dim) {
-    /** @type {string[]} */
-    const lines = []
-    const buildings = Array.from(entry.buildings())
-    if (buildings.length == 0) return lines
-
-    // 本地化名称
-    let name = entry.name()
-    let localized = Chat.createTextHelperFromTranslationKey(entry.translatableKey()).getString().trim()
-    if (localized && localized !== entry.translatableKey())
-        name = localized
-
-    lines.push(`§e${name} §7(${entry.name()})`)
-    lines.push(`§7区块: §f${cx}, ${cz}`)
-
-    const registered = adv.isDone(buildings[0])
-    const visited = getVisitedTime(dim, `${cx},${cz}`) != null
-    lines.push(`§7收集: ${registered ? '§a已注册' : '§c未注册'}`)
-    lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
-    let citystyle = adv.getCityStyle(buildings[0])
-    if (citystyle)
-        lines.push(`§7区域: ${citystyle}`)
-
-    if (visited) {
-        lines.push(`§8Shift+左键 取消标记`)
-    } else {
-        lines.push(`§8Shift+左键 标记去过`)
+/** 已去过区块存储 */
+class VisitedStore {
+    /** @param {string|() => string} path 存储路径 */
+    constructor(path) {
+        /** @type {string|() => string} */ this._path = path
+        /** @type {Object<string, Object<string, number>>|null} 维度 → { 区块key: 时间戳 } */
+        this.cache = null
     }
 
-    return lines
+    get path() { return typeof this._path == 'function' ? this._path() : this._path }
+
+    /** 从本地文件加载
+     * @returns {Object<string, Object<string, number>>}
+     */
+    load() {
+        if (this.cache) return this.cache
+        this.cache = {}
+        try {
+            if (FS.exists(this.path)) {
+                const raw = FS.open(this.path).read()
+                if (raw && raw.length > 0) this.cache = JSON.parse(raw)
+            }
+        } catch (e) {
+            Chat.log(`§c[雷达] 加载已去过记录失败: ${e}`)
+            this.cache = {}
+        }
+        return this.cache
+    }
+
+    /** 保存到本地文件 */
+    save() {
+        if (!this.cache) return
+        try {
+            const dir = this.path.substring(0, this.path.lastIndexOf('/'))
+            if (!FS.exists(dir)) FS.open(dir).mkdir()
+            FS.open(this.path).write(JSON.stringify(this.cache, null, 4))
+        } catch (e) {
+            Chat.log(`§c[雷达] 保存已去过记录失败: ${e}`)
+        }
+    }
+
+    /**
+     * 获取某维度某区块的记录时间戳
+     * @param {string} dim
+     * @param {string} chunkKey "cx,cz"
+     * @returns {number|null}
+     */
+    getTime(dim, chunkKey) {
+        return this.load()[dim]?.[chunkKey] ?? null
+    }
+
+    /**
+     * 切换某维度某区块的已去过状态
+     * @param {string} dim
+     * @param {string} chunkKey
+     * @returns {boolean} 切换后的状态
+     */
+    toggle(dim, chunkKey) {
+        const cache = this.load()
+        if (!cache[dim]) cache[dim] = {}
+
+        let now
+        if (cache[dim][chunkKey] !== undefined) {
+            delete cache[dim][chunkKey]
+            now = false
+        } else {
+            cache[dim][chunkKey] = Date.now()
+            now = true
+        }
+        this.save()
+        return now
+    }
 }
+
+/** 雷达标记：管理光标周边区块的注册状态渲染 */
+class RadarMarker {
+    /**
+     * @param {Draw2DUtils} d2d 渲染画布
+     * @param {DCAdvancement} adv 进度查询
+     * @param {VisitedStore} store 已去过存储
+     */
+    constructor(d2d, adv, store) {
+        /** @type {Draw2DUtils} */ this.d2d = d2d
+        /** @type {DCAdvancement} */ this.adv = adv
+        /** @type {VisitedStore} */ this.store = store
+        /** @type {Map<string, {cx:number,cz:number,image:any}>} 区块key → 标记 */
+        this.markers = new Map()
+        /** @type {boolean} 渲染开关 */
+        this.enabled = false
+    }
+
+    /** 清空所有标记 */
+    clear() {
+        for (const m of this.markers.values())
+            this.d2d.target.removeElement(m.image)
+        this.markers.clear()
+    }
+
+    /**
+     * 判断某区块的标记状态
+     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
+     * @param {number} cx
+     * @param {number} cz
+     * @param {string} dim
+     * @returns {MarkerStateDef|null} MarkerState 之一；null=不显示
+     */
+    stateOf(entry, cx, cz, dim) {
+        const buildings = Array.from(entry.buildings())
+        if (buildings.length === 0) return null
+        const registered = this.adv.isDone(buildings[0])
+        const visited = this.store.getTime(dim, `${cx},${cz}`) != null
+        if (registered && visited) return MarkerState.REGISTERED_VISITED
+        if (registered && !visited) return MarkerState.REGISTERED_UNVISITED
+        if (!registered && visited) return MarkerState.UNREGISTERED_VISITED
+        return MarkerState.UNREGISTERED_UNVISITED
+    }
+
+    /**
+     * 重建周边标记（只在光标换区块或状态变化时调用）
+     * @param {number} ccx 中心区块 X
+     * @param {number} ccz 中心区块 Z
+     * @param {string} dim
+     */
+    rebuild(ccx, ccz, dim) {
+        this.clear()
+        if (!this.enabled) return
+        const level = getClientLevel()
+        for (let dx = -MARKER_RADIUS; dx <= MARKER_RADIUS; dx++) {
+            for (let dz = -MARKER_RADIUS; dz <= MARKER_RADIUS; dz++) {
+                const cx = ccx + dx
+                const cz = ccz + dz
+                let entry = null
+                try {
+                    entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz))
+                } catch (e) { /* 忽略 */ }
+                if (!entry) continue
+
+                const state = this.stateOf(entry, cx, cz, dim)
+                if (state == null || !state.texture) continue
+
+                const image = this.d2d.target.imageBuilder()
+                    .fromCustomImage(state.texture).alpha(200).size(14, 14)
+                    .build()
+                this.d2d.target.reAddElement(image)
+                this.markers.set(`${cx},${cz}`, { cx, cz, image })
+            }
+        }
+    }
+
+    /**
+     * 每 tick 更新标记屏幕坐标
+     * @param {GuiMap} guimap
+     */
+    update(guimap) {
+        if (!this.enabled || this.markers.size === 0) return
+        const camX = guimap.cameraX
+        const camZ = guimap.cameraZ
+        const scale = guimap.mapScale / Hud.getScaleFactor()
+        const halfW = guimap.width / 2
+        const halfH = guimap.height / 2
+        const size = Math.max(2, Math.round(14 * scale))
+
+        for (const m of this.markers.values()) {
+            const x = Math.round(halfW + (m.cx * 16 + 1 - camX) * scale)
+            const y = Math.round(halfH + (m.cz * 16 + 1 - camZ) * scale)
+            m.image.moveTo(x, y).setSize(size, size)
+        }
+    }
+
+    /** 切换开关 */
+    toggle() {
+        this.enabled = !this.enabled
+        if (!this.enabled) this.clear()
+        return this.enabled
+    }
+}
+
+/** tooltip 构建器 */
+class RadarTooltip {
+    /**
+     * @param {DCAdvancement} adv
+     * @param {VisitedStore} store
+     */
+    constructor(adv, store) {
+        /** @type {DCAdvancement} */ this.adv = adv
+        /** @type {VisitedStore} */ this.store = store
+    }
+
+    /**
+     * 构建带雷达数据的 tooltip
+     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
+     * @param {number} cx
+     * @param {number} cz
+     * @param {string} dim
+     * @returns {string[]}
+     */
+    build(entry, cx, cz, dim) {
+        /** @type {string[]} */
+        const lines = []
+        const buildings = Array.from(entry.buildings())
+        if (buildings.length === 0) return lines
+
+        let name = entry.name()
+        const localized = Chat.createTextHelperFromTranslationKey(entry.translatableKey()).getString().trim()
+        if (localized && localized !== entry.translatableKey()) name = localized
+
+        lines.push(`§e${name} §7(${entry.name()})`)
+        lines.push(`§7区块: §f${cx}, ${cz}`)
+
+        const registered = this.adv.isDone(buildings[0])
+        const visited = this.store.getTime(dim, `${cx},${cz}`) != null
+        lines.push(`§7收集: ${registered ? '§a已注册' : '§c未注册'}`)
+        lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
+
+        lines.push(visited ? `§8Shift+左键 取消标记` : `§8Shift+左键 标记去过`)
+        return lines
+    }
+
+    /**
+     * 构建无雷达数据但已去过的简化 tooltip
+     * @param {number} cx
+     * @param {number} cz
+     * @param {number} visitedTime 时间戳
+     * @returns {string[]}
+     */
+    buildVisitedOnly(cx, cz, visitedTime) {
+        const timeStr = new Date(visitedTime).toLocaleString()
+        return [
+            `§a✔ 已去过 §7(${timeStr})`,
+            `§7区块: §f${cx}, ${cz}`,
+            `§8Shift+左键 取消标记`,
+        ]
+    }
+}
+
+// ==================== 全局实例 ====================
+
+const bus = new EventBus()
+const adv = new DCAdvancement()
+const visitedStore = new VisitedStore(VISITED_PATH)
+const radarTooltip = new RadarTooltip(adv, visitedStore)
+
+// 预创建所有标记纹理
+MarkerState.initTextures()
+
+// ==================== 主逻辑 ====================
 
 /** @type {any|null} OpenScreen 监听 id */
 let screen_listener = null
+/** @type {string|null} filter_listener 监听 id */
+let filter_listener = null
+/** @type {string|null} 上次记录的玩家所在区块 key（自动记录用） */
+let last_player_key = null
+
 function main() {
     screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
         const screen = Hud.getOpenScreen()
@@ -736,6 +883,8 @@ function main() {
 
             const radar_d2d = new Draw2DUtils(region)
             screen.addDraw2D(radar_d2d.target, region.x, region.y, region.width, region.height)
+
+            const marker = new RadarMarker(radar_d2d, adv, visitedStore)
 
             /** @type {string|null} 上次查询的区块 key */
             let last_key = null
@@ -759,38 +908,40 @@ function main() {
                 const key = `${cx},${cz}`
                 const dim = World.getDimension()
 
-                // ---- Shift+左键：切换已去过状态 ----
-                if (event.click(Event.LEFTCLICK) && pressedKeys.includes(Event.SHIFT)) {
-                    const now = toggleVisited(dim, key)
-                    mclog(now ? `已标记 §a${key} §7(已去过)` : `已取消标记 §c${key}`)
-                    last_key = null   // 强制下一 tick 重新构建 tooltip
+                // ---- H 键：切换标记渲染 ----
+                if (event.click(Event.KEY_H)) {
+                    const on = marker.toggle()
+                    mclog(on ? '标记渲染 §a开启' : '标记渲染 §c关闭')
+                    if (on) marker.rebuild(cx, cz, dim)
                 }
 
+                // ---- Shift+左键：切换已去过状态，立即重建标记 ----
+                if (event.click(Event.LEFTCLICK) && pressedKeys.includes(Event.SHIFT)) {
+                    const now = visitedStore.toggle(dim, key)
+                    mclog(now ? `已标记 §a${key} §7(已去过)` : `已取消标记 §c${key}`)
+                    last_key = null
+                    marker.rebuild(cx, cz, dim)
+                } else if (key !== last_key) {
+                    marker.rebuild(cx, cz, dim)
+                }
+
+                marker.update(guimap)
                 // ---- 鼠标换区块才重新查询 ----
                 if (key !== last_key) {
                     last_key = key
                     try {
-                        last_entry = ClientMapData.getPaletteEntry(
-                            getClientLevel(),
-                            new ChunkPos(cx, cz)
-                        )
+                        last_entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
                     } catch (e) {
                         last_entry = null
                     }
                 }
 
                 if (last_entry) {
-                    radar_d2d.tooltips = buildRadarTooltip(last_entry, cx, cz, dim)
+                    radar_d2d.tooltips = radarTooltip.build(last_entry, cx, cz, dim)
                 } else {
-                    const visitedTime = getVisitedTime(dim, key)
-                    if (visitedTime != null) {
-                        const timeStr = new Date(visitedTime).toLocaleString()
-                        radar_d2d.tooltips = [
-                            `§a✔ 已去过 §7(${timeStr})`,
-                            `§7区块: §f${cx}, ${cz}`,
-                            `§8Shift+左键 取消标记`,
-                        ]
-                    }
+                    const visitedTime = visitedStore.getTime(dim, key)
+                    if (visitedTime != null)
+                        radar_d2d.tooltips = radarTooltip.buildVisitedOnly(cx, cz, visitedTime)
                 }
             })
         }
@@ -804,13 +955,6 @@ try {
 } catch {
     setToggle(!isToggle())
 }
-
-const bus = new EventBus()
-const adv = new DCAdvancement()
-/** @type {string|null} filter_listener 监听 id */
-let filter_listener = null
-/** @type {string|null} 上次记录的玩家所在区块 key（自动记录用） */
-let last_player_key = null
 
 if (isToggle()) {
     bus.start()
@@ -829,8 +973,8 @@ if (isToggle()) {
             )
             let buildings = entry ? Array.from(entry.buildings()) : []
             if (buildings.length > 0) {
-                if (getVisitedTime(dim, playerKey) == null) {
-                    toggleVisited(dim, playerKey)
+                if (visitedStore.getTime(dim, playerKey) == null) {
+                    visitedStore.toggle(dim, playerKey)
                     Chat.actionbar(`添加记录 §a${playerKey}`)
                 }
 

@@ -1068,7 +1068,7 @@ if (isToggle()) {
                         Chat.actionbar(`添加记录 §a${added} §7个区块`)
 
                     adv.loads()
-                    if (!adv.isDone([0]))
+                    if (!adv.isDone(buildings[0]))
                         mclog('此建筑尚未注册')
                 }
             }

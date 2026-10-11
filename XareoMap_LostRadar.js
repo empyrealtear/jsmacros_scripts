@@ -5,18 +5,33 @@
 // 更新内容: v1.1 自动记录停留过的建筑区块，允许添加为常驻服务脚本，修复未正确获取维度名
 // 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
 // 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，按存档名隔离存储数据，若已使用之前版本需要手动改为新文件名
+// 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
 
 const scriptName = 'XareoMap_LostRadar.ToggleScript'
 /** 已去过区块的存储路径 */
 const VISITED_PATH = () => `lostradar_visited_${World.getWorldIdentifier()}.json`
 /** 渲染半径（区块） */
-const MARKER_RADIUS = 6
+const MARKER_RADIUS = 8
 
+/**
+ * 输出带脚本名前缀的聊天日志
+ * @param {string} msg 日志内容
+ * @param {number} [color=0x7] 文本颜色
+ */
 const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
     .append("[").withColor(0x5).append(scriptName).withColor(0x5)
     .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
+
+/** @returns {boolean} 脚本是否处于启用状态 */
 const isToggle = () => GlobalVars.getBoolean(scriptName)
-const setToggle = (v) => { GlobalVars.putBoolean(scriptName, v); mclog(v ? "启用" : "关闭") }
+/**
+ * 设置脚本启用状态
+ * @param {boolean} v
+ */
+const setToggle = (v) => {
+    GlobalVars.putBoolean(scriptName, v)
+    mclog(v ? "启用" : "关闭")
+}
 
 /** 
  * @typedef {com.mojang.blaze3d.platform.Window} Window
@@ -58,6 +73,45 @@ function getPlayerChunkKey() {
     if (!player) return null
     const chunk = player.getChunk()
     return `${chunk.getChunkX()},${chunk.getChunkZ()}`
+}
+
+/**
+ * 扩展相邻同名建筑区块，直到收集到 targetCount 个
+ * @param {number} cx 中心区块 X
+ * @param {number} cz 中心区块 Z
+ * @param {string} dim 维度
+ * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} centerEntry 中心区块条目
+ * @returns {string[]} 区块 key 列表（含自身）
+ */
+function expandSameName(cx, cz, dim, centerEntry) {
+    const name = centerEntry.name()
+    const targetCount = Math.max(1, Array.from(centerEntry.buildings()).length)
+    const level = getClientLevel()
+
+    const visited = new Set([`${cx},${cz}`])
+    const queue = [[cx, cz]]
+
+    while (queue.length > 0 && visited.size < targetCount) {
+        const [x, z] = queue.shift()
+
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            if (visited.size >= targetCount) break
+            const nx = x + dx
+            const nz = z + dz
+            const nkey = `${nx},${nz}`
+            if (visited.has(nkey)) continue
+
+            let nEntry = null
+            try {
+                nEntry = ClientMapData.getPaletteEntry(level, new ChunkPos(nx, nz))
+            } catch (e) { /* 忽略 */ }
+            if (!nEntry || nEntry.name() !== name) continue
+
+            visited.add(nkey)
+            queue.push([nx, nz])
+        }
+    }
+    return Array.from(visited)
 }
 
 /** 反射工具 @template T */
@@ -587,17 +641,17 @@ class DCAdvancement {
     }
 }
 
-/** @typedef {{color:number, texture:CustomImage|null}} MarkerStateDef 标记状态定义 */ 
+/** @typedef {{color:number, texture:CustomImage|null}} MarkerStateDef 标记状态定义 */
 /** 标记状态（附带纹理初始化） */
 const MarkerState = {
     /** 未注册 + 未去过（红） */
     UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null },
     /** 未注册 + 已去过（橙） */
-    UNREGISTERED_VISITED:   { color: 0xFF8844, texture: null },
+    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null },
     /** 已注册 + 未去过（黄） */
-    REGISTERED_UNVISITED:   { color: 0xFFFF44, texture: null },
+    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null },
     /** 已注册 + 已去过（绿） */
-    REGISTERED_VISITED:     { color: 0x44FF44, texture: null },
+    REGISTERED_VISITED: { color: 0x44FF44, texture: null },
 
     /** 预创建所有标记纹理 */
     initTextures() {
@@ -701,7 +755,7 @@ class RadarMarker {
         /** @type {Map<string, {cx:number,cz:number,image:any}>} 区块key → 标记 */
         this.markers = new Map()
         /** @type {boolean} 渲染开关 */
-        this.enabled = false
+        this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
     }
 
     /** 清空所有标记 */
@@ -785,6 +839,7 @@ class RadarMarker {
     /** 切换开关 */
     toggle() {
         this.enabled = !this.enabled
+        GlobalVars.putBoolean(`${scriptName}:Hightlight`, this.enabled)
         if (!this.enabled) this.clear()
         return this.enabled
     }
@@ -828,6 +883,7 @@ class RadarTooltip {
         lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
 
         lines.push(visited ? `§8Shift+左键 取消标记` : `§8Shift+左键 标记去过`)
+        // for (let i of buildings) lines.push(`${i}`)
         return lines
     }
 
@@ -917,8 +973,30 @@ function main() {
 
                 // ---- Shift+左键：切换已去过状态，立即重建标记 ----
                 if (event.click(Event.LEFTCLICK) && pressedKeys.includes(Event.SHIFT)) {
-                    const now = visitedStore.toggle(dim, key)
-                    mclog(now ? `已标记 §a${key} §7(已去过)` : `已取消标记 §c${key}`)
+                    // 用当前鼠标区块的 entry 做扩展依据
+                    let centerEntry = last_entry
+                    if (!centerEntry) {
+                        try {
+                            centerEntry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                        } catch (e) { /* 忽略 */ }
+                    }
+
+                    if (centerEntry && Array.from(centerEntry.buildings() ?? []).length > 0) {
+                        const cluster = expandSameName(cx, cz, dim, centerEntry)
+                        const allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
+                        const targetState = !allVisited
+                        for (const k of cluster) {
+                            const has = visitedStore.getTime(dim, k) != null
+                            if (targetState !== has) visitedStore.toggle(dim, k)
+                        }
+                        mclog(targetState
+                            ? `已标记 §a${cluster.length} §7个区块`
+                            : `已取消 §c${cluster.length} §7个区块`)
+                    } else {
+                        const now = visitedStore.toggle(dim, key)
+                        mclog(now ? `已标记 §a${key}` : `已取消 §c${key}`)
+                    }
+
                     last_key = null
                     marker.rebuild(cx, cz, dim)
                 } else if (key !== last_key) {
@@ -965,22 +1043,34 @@ if (isToggle()) {
         let playerKey = getPlayerChunkKey()
         if (playerKey != null && playerKey !== last_player_key) {
             last_player_key = playerKey
-            let dim = World.getDimension()
-            let parts = playerKey.split(',')
+            const dim = World.getDimension()
+            const parts = playerKey.split(',')
+            const pcx = parseInt(parts[0], 10)
+            const pcz = parseInt(parts[1], 10)
+
             let entry = ClientMapData.getPaletteEntry(
                 getClientLevel(),
-                new ChunkPos(parseInt(parts[0], 10), parseInt(parts[1], 10))
+                new ChunkPos(pcx, pcz)
             )
-            let buildings = entry ? Array.from(entry.buildings()) : []
-            if (buildings.length > 0) {
-                if (visitedStore.getTime(dim, playerKey) == null) {
-                    visitedStore.toggle(dim, playerKey)
-                    Chat.actionbar(`添加记录 §a${playerKey}`)
-                }
+            if (entry) {
+                let buildings = Array.from(entry.buildings())
+                if (buildings.length > 0) {
+                    // 扩展同名建筑，一同标记
+                    const cluster = expandSameName(pcx, pcz, dim, entry)
+                    let added = 0
+                    for (const k of cluster) {
+                        if (visitedStore.getTime(dim, k) == null) {
+                            visitedStore.toggle(dim, k)
+                            added++
+                        }
+                    }
+                    if (added > 0)
+                        Chat.actionbar(`添加记录 §a${added} §7个区块`)
 
-                adv.loads()
-                if (!adv.isDone(buildings[0]))
-                    mclog('此建筑尚未注册')
+                    adv.loads()
+                    if (!adv.isDone([0]))
+                        mclog('此建筑尚未注册')
+                }
             }
         }
 

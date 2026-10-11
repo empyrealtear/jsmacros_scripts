@@ -6,6 +6,7 @@
 // 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
 // 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，按存档名隔离存储数据，若已使用之前版本需要手动改为新文件名
 // 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
+// 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
 
 const scriptName = 'XareoMap_LostRadar.ToggleScript'
 /** 已去过区块的存储路径 */
@@ -13,25 +14,13 @@ const VISITED_PATH = () => `lostradar_visited_${World.getWorldIdentifier()}.json
 /** 渲染半径（区块） */
 const MARKER_RADIUS = 8
 
-/**
- * 输出带脚本名前缀的聊天日志
- * @param {string} msg 日志内容
- * @param {number} [color=0x7] 文本颜色
- */
+
 const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
     .append("[").withColor(0x5).append(scriptName).withColor(0x5)
     .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
 
-/** @returns {boolean} 脚本是否处于启用状态 */
 const isToggle = () => GlobalVars.getBoolean(scriptName)
-/**
- * 设置脚本启用状态
- * @param {boolean} v
- */
-const setToggle = (v) => {
-    GlobalVars.putBoolean(scriptName, v)
-    mclog(v ? "启用" : "关闭")
-}
+const setToggle = (v) => mclog(GlobalVars.putBoolean(scriptName, v) ? "启用" : "关闭")
 
 /** 
  * @typedef {com.mojang.blaze3d.platform.Window} Window
@@ -76,7 +65,7 @@ function getPlayerChunkKey() {
 }
 
 /**
- * 扩展相邻同名建筑区块，直到收集到 targetCount 个
+ * 扩展相邻同名建筑区块
  * @param {number} cx 中心区块 X
  * @param {number} cz 中心区块 Z
  * @param {string} dim 维度
@@ -85,9 +74,10 @@ function getPlayerChunkKey() {
  */
 function expandSameName(cx, cz, dim, centerEntry) {
     const name = centerEntry.name()
-    const level = getClientLevel()
-
     const visited = new Set([`${cx},${cz}`])
+    if (!name.startsWith('multi_')) return Array.from(visited)
+
+    const level = getClientLevel()
     const queue = [[cx, cz]]
 
     while (queue.length > 0) {
@@ -639,25 +629,42 @@ class DCAdvancement {
     }
 }
 
-/** @typedef {{color:number, texture:CustomImage|null}} MarkerStateDef 标记状态定义 */
+/** @typedef {{color:number, texture:CustomImage|null, largeTexture:CustomImage|null}} MarkerStateDef 标记状态定义 */
 /** 标记状态（附带纹理初始化） */
 const MarkerState = {
     /** 未注册 + 未去过（红） */
-    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null },
+    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null, largeTexture: null },
     /** 未注册 + 已去过（橙） */
-    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null },
+    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null, largeTexture: null },
     /** 已注册 + 未去过（黄） */
-    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null },
+    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null, largeTexture: null },
     /** 已注册 + 已去过（绿） */
-    REGISTERED_VISITED: { color: 0x44FF44, texture: null },
+    REGISTERED_VISITED: { color: 0x44FF44, texture: null, largeTexture: null },
 
     /** 预创建所有标记纹理 */
     initTextures() {
         for (const [name, state] of Object.entries(this)) {
             if (typeof state !== 'object' || !('color' in state)) continue
             try {
+                // 普通建筑
                 state.texture = Hud.createTexture(16, 16, `lostradar_marker_${name}`)
-                    .setGraphicsColor(state.color).drawRect(0, 0, 15, 15).update()
+                    .setGraphicsColor(0x000000)
+                    .fillRect(1, 1, 14, 14)
+                    .setGraphicsColor(state.color)
+                    .drawRoundRect(0, 0, 15, 15, 8, 8)
+                    .drawRoundRect(3, 3, 9, 9, 8, 8)
+                    .setXorMode(0x000000)
+                    .drawRect(0, 0, 15, 15)
+                    .update()
+                // 大型建筑
+                state.largeTexture = Hud.createTexture(16, 16, `lostradar_marker_large_${name}`)
+                    .setGraphicsColor(0x000000)
+                    .fillRect(0, 0, 15, 15)
+                    .setGraphicsColor(state.color)
+                    .drawRoundRect(0, 0, 15, 15, 16, 16)
+                    .drawRoundRect(3, 3, 9, 9, 8, 8)
+                    .drawRect(0, 0, 15, 15)
+                    .update()
             } catch (e) {
                 Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
             }
@@ -750,7 +757,7 @@ class RadarMarker {
         /** @type {Draw2DUtils} */ this.d2d = d2d
         /** @type {DCAdvancement} */ this.adv = adv
         /** @type {VisitedStore} */ this.store = store
-        /** @type {Map<string, {cx:number,cz:number,image:any}>} 区块key → 标记 */
+        /** @type {Map<string, {cx:number,cz:number,image:any,isLarge:boolean}>} 区块key → 标记 */
         this.markers = new Map()
         /** @type {boolean} 渲染开关 */
         this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
@@ -769,17 +776,19 @@ class RadarMarker {
      * @param {number} cx
      * @param {number} cz
      * @param {string} dim
-     * @returns {MarkerStateDef|null} MarkerState 之一；null=不显示
+     * @returns {{state:MarkerStateDef, isLarge:boolean}|null} 状态 + 是否大型建筑；null=不显示
      */
     stateOf(entry, cx, cz, dim) {
         const buildings = Array.from(entry.buildings())
         if (buildings.length === 0) return null
         const registered = this.adv.isDone(buildings[0])
         const visited = this.store.getTime(dim, `${cx},${cz}`) != null
-        if (registered && visited) return MarkerState.REGISTERED_VISITED
-        if (registered && !visited) return MarkerState.REGISTERED_UNVISITED
-        if (!registered && visited) return MarkerState.UNREGISTERED_VISITED
-        return MarkerState.UNREGISTERED_UNVISITED
+        let state
+        if (registered && visited) state = MarkerState.REGISTERED_VISITED
+        else if (registered && !visited) state = MarkerState.REGISTERED_UNVISITED
+        else if (!registered && visited) state = MarkerState.UNREGISTERED_VISITED
+        else state = MarkerState.UNREGISTERED_UNVISITED
+        return { state, isLarge: entry.name().startsWith('multi_') }
     }
 
     /**
@@ -797,19 +806,22 @@ class RadarMarker {
                 const cx = ccx + dx
                 const cz = ccz + dz
                 let entry = null
-                try {
-                    entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz))
-                } catch (e) { /* 忽略 */ }
+                try { entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz)) } catch (e) { }
                 if (!entry) continue
 
-                const state = this.stateOf(entry, cx, cz, dim)
-                if (state == null || !state.texture) continue
+                const info = this.stateOf(entry, cx, cz, dim)
+                if (info == null) continue
+
+                // 按建筑类型选择纹理
+                const tex = info.isLarge ? info.state.largeTexture : info.state.texture
+                if (!tex) continue
 
                 const image = this.d2d.target.imageBuilder()
-                    .fromCustomImage(state.texture).alpha(200).size(14, 14)
+                    .fromCustomImage(tex).alpha(200)
+                    .size(info.isLarge ? 16 : 14, info.isLarge ? 16 : 14)
                     .build()
                 this.d2d.target.reAddElement(image)
-                this.markers.set(`${cx},${cz}`, { cx, cz, image })
+                this.markers.set(`${cx},${cz}`, { cx, cz, image, isLarge: info.isLarge })
             }
         }
     }
@@ -825,12 +837,15 @@ class RadarMarker {
         const scale = guimap.mapScale / Hud.getScaleFactor()
         const halfW = guimap.width / 2
         const halfH = guimap.height / 2
-        const size = Math.max(2, Math.round(14 * scale))
 
         for (const m of this.markers.values()) {
-            const x = Math.round(halfW + (m.cx * 16 + 1 - camX) * scale)
-            const y = Math.round(halfH + (m.cz * 16 + 1 - camZ) * scale)
-            m.image.moveTo(x, y).setSize(size, size)
+            // 普通建筑 14×14 → 偏移 +1 居中；大型建筑 16×16 → 偏移 +0 铺满
+            const offset = m.isLarge ? 0 : 1
+            const base = m.isLarge ? 16 : 14
+            const x = Math.round(halfW + (m.cx * 16 + offset - camX) * scale)
+            const y = Math.round(halfH + (m.cz * 16 + offset - camZ) * scale)
+            const size = Math.max(2, Math.round(base * scale))
+            m.image.moveTo(x | 0, y | 0).setSize(size, size)
         }
     }
 
@@ -948,12 +963,10 @@ function main() {
 
             filter_listener = bus.addListener(event => {
                 const pressedKeys = event.keys
-                tick_counter++
-                if (pressedKeys.length == 0 && tick_counter % 5 !== 0) return
+                if (pressedKeys.length == 0 && ++tick_counter % 3 !== 0) return
                 tick_counter = 0
 
                 radar_d2d.tooltips = []
-
                 // 读鼠标区块
                 const mx = guimap.mouseBlockPosX
                 const mz = guimap.mouseBlockPosZ
@@ -974,12 +987,10 @@ function main() {
                     // 用当前鼠标区块的 entry 做扩展依据
                     let centerEntry = last_entry
                     if (!centerEntry) {
-                        try {
-                            centerEntry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
-                        } catch (e) { /* 忽略 */ }
+                        centerEntry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
                     }
 
-                    if (centerEntry && Array.from(centerEntry.buildings() ?? []).length > 0) {
+                    if (centerEntry && centerEntry.buildings().size() > 0) {
                         const cluster = expandSameName(cx, cz, dim, centerEntry)
                         const allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
                         const targetState = !allVisited
@@ -1053,7 +1064,6 @@ if (isToggle()) {
             if (entry) {
                 let buildings = Array.from(entry.buildings())
                 if (buildings.length > 0) {
-                    // 扩展同名建筑，一同标记
                     const cluster = expandSameName(pcx, pcz, dim, entry)
                     let added = 0
                     for (const k of cluster) {
@@ -1071,7 +1081,6 @@ if (isToggle()) {
                 }
             }
         }
-
         Client.waitTick(5)
     }
 }

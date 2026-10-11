@@ -85,17 +85,15 @@ function getPlayerChunkKey() {
  */
 function expandSameName(cx, cz, dim, centerEntry) {
     const name = centerEntry.name()
-    const targetCount = Math.max(1, Array.from(centerEntry.buildings()).length)
     const level = getClientLevel()
 
     const visited = new Set([`${cx},${cz}`])
     const queue = [[cx, cz]]
 
-    while (queue.length > 0 && visited.size < targetCount) {
+    while (queue.length > 0) {
         const [x, z] = queue.shift()
 
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            if (visited.size >= targetCount) break
             const nx = x + dx
             const nz = z + dz
             const nkey = `${nx},${nz}`

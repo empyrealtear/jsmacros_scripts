@@ -1,4 +1,4 @@
-<img width="1161" height="861" alt="QQ_1792060187684" src="https://github.com/user-attachments/assets/f608a079-02c1-468e-b8b9-cbd96cdc79f6" /># jsmacros宏模组脚本合集
+# jsmacros宏模组脚本合集
 
 - 描述：为minecraft游戏jsmacros模组（以下简称jsm）编写的脚本
 

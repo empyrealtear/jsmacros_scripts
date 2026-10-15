@@ -4,6 +4,7 @@
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 在世界地图添加Draw2D画布，渲染矿脉
 // 更新内容: v1.2 改为注册自定义地图渲染层
+// 更新内容: v1.3 渲染层类构造代码复用
 
 const scriptName = 'XareoMap_IEVeins.ToggleScript'
 
@@ -182,20 +183,19 @@ class ModBuilder {
     static suffix = '' + `_${Date.now()}`
 
     /** 共用 Element 短名 */
-    static ELEMENT = `${this.namespace}_Element${this.suffix}`
+    static Element = `${this.namespace}_Element${this.suffix}`
+    static Context = `${this.namespace}_Context${this.suffix}`
     /** 小地图短名 */
     static MINIMAP = {
-        Context: `${this.namespace}_MiniContext${this.suffix}`,
-        Provider: `${this.namespace}_MiniProvider${this.suffix}`,
-        Reader: `${this.namespace}_MiniReader${this.suffix}`,
-        Renderer: `${this.namespace}_MiniRenderer${this.suffix}`,
+        Provider: `${this.namespace}_MinimapProvider${this.suffix}`,
+        Reader: `${this.namespace}_MinimapReader${this.suffix}`,
+        Renderer: `${this.namespace}_MinimapRenderer${this.suffix}`,
     }
     /** 世界地图短名 */
     static WORLDMAP = {
-        Context: `${this.namespace}_WorldContext${this.suffix}`,
-        Provider: `${this.namespace}_WorldProvider${this.suffix}`,
-        Reader: `${this.namespace}_WorldReader${this.suffix}`,
-        Renderer: `${this.namespace}_WorldRenderer${this.suffix}`,
+        Provider: `${this.namespace}_WorldMapProvider${this.suffix}`,
+        Reader: `${this.namespace}_WorldMapReader${this.suffix}`,
+        Renderer: `${this.namespace}_WorldMapRenderer${this.suffix}`,
     }
     /** 长类名集中管理 */
     static IMPORT = {
@@ -224,7 +224,7 @@ class ModBuilder {
             'net.minecraft.client.gui.Drawable', 'net.minecraft.src.C_252359_'),
         // === Xaero 小地图 ===
         Minimap: 'xaero.minimap.XaeroMinimap',
-        MiniLoc: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
+        MiniLocation: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
         MiniInfo: 'xaero.hud.minimap.element.render.MinimapElementRenderInfo',
         MiniProvider: 'xaero.hud.minimap.element.render.MinimapElementRenderProvider',
         MiniReader: 'xaero.hud.minimap.element.render.MinimapElementReader',
@@ -234,7 +234,7 @@ class ModBuilder {
         MiniTextureProvider: 'xaero.common.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
         // === Xaero 世界地图 ===
         WorldMap: 'xaero.map.WorldMap',
-        WorldLoc: 'xaero.map.element.render.ElementRenderLocation',
+        WorldLocation: 'xaero.map.element.render.ElementRenderLocation',
         WorldInfo: 'xaero.map.element.render.ElementRenderInfo',
         WorldProvider: 'xaero.map.element.render.ElementRenderProvider',
         WorldReader: 'xaero.map.element.render.ElementReader',
@@ -254,20 +254,16 @@ class ModBuilder {
      */
     static builder(opts) {
         const { name, extend, fields, constructors, methods } = opts
-        let exist = this.load(name)
-        if (exist) return exist
-
         let builder = Reflection.createClassBuilder(name, Java.type(extend ?? 'java.lang.Object'))
         fields && fields?.forEach(v => builder.addField(v))
         constructors && constructors?.forEach(v => builder.addConstructor(v))
         methods && methods?.forEach(v => builder.addMethod(v))
         return builder.finishBuildAndFreeze()
     }
-
     static createElementClass() {
-        const name = this.ELEMENT
-        const I = this.IMPORT
-        return this.builder({
+        const name = this.Element
+        const { String, Function } = this.IMPORT
+        return this.load(name) ?? this.builder({
             name: name,
             fields: [
                 `public int x;`,
@@ -278,67 +274,64 @@ class ModBuilder {
                 `public int depletion = 0;`,
                 `public String mineral = "";`,
                 `public String icon = "minecraft:stone";`,
-                `public ${I.Function} render = null;`,
+                `public ${Function} render = null;`,
             ],
-            constructors: [`public ${name}(int x, int z, int color, int size, ${I.Function} render) {
+            constructors: [`public ${name}(int x, int z, int color, int size, ${Function} render) {
                 this.x = x; this.z = z; this.color = color; this.size = size; this.render = render;
             }`],
             methods: [
-                `public double centerX() { return (double) this.x + 0.5; }`,
-                `public double centerZ() { return (double) this.z + 0.5; }`,
+                `public double centerX() { return (this.x + 0.5) * 1.0; }`,
+                `public double centerZ() { return (this.z + 0.5) * 1.0; }`,
+                `public ${String} displayName() { return x + "," + z; }`,
             ]
         })
     }
-    static createMinimapContextClass() {
-        const name = this.MINIMAP.Context
-        const I = this.IMPORT
-        return this.builder({
+    static createContextClass() {
+        const name = this.Context
+        const { ArrayList } = this.IMPORT
+        return this.load(name) ?? this.builder({
             name: name,
             fields: [
-                `public ${I.ArrayList} elements = new ${I.ArrayList}();`,
-                `public ${I.MiniLoc} location = ${I.MiniLoc}.UNKNOWN;`,
+                `public ${ArrayList} elements = new ${ArrayList}();`,
                 `public double scale = 1.0;`,
                 `public boolean enabled = true;`,
             ],
             constructors: [`public ${name}() { super(); }`],
-            methods: [`public void update(${I.MiniInfo} info) {
-                this.location = (info == null) ? ${I.MiniLoc}.UNKNOWN : info.location;
-                this.scale = xaero.common.HudMod.INSTANCE.getMinimap().getMinimapFBORenderer().getZoom();
-            }`]
         })
     }
-    static createMinimapProviderClass() {
-        const name = this.MINIMAP.Provider
-        let element = this.className(this.ELEMENT)
-        let context = this.className(this.MINIMAP.Context)
-        const I = this.IMPORT
-        const mcCls = I.Minecraft
-        const mcGet = DeobfRef.methodName(mcCls, 'getInstance', 'method_1551', 'm_91087_')
-        const mcPlayerField = DeobfRef.fieldName(mcCls, 'player', 'field_1724', 'f_91074_')
+    static createProviderClass(name, extend, location) {
+        const { Object, Iterator, Collections, ArrayList, Minecraft } = this.IMPORT
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
+        const mcGet = DeobfRef.methodName(Minecraft, 'getInstance', 'method_1551', 'm_91087_')
+        const mcPlayerField = DeobfRef.fieldName(Minecraft, 'player', 'field_1724', 'f_91074_')
         const entityCls = DeobfRef.className(
             'net.minecraft.world.entity.Entity', 'net.minecraft.class_1297',
             'net.minecraft.entity.Entity', 'net.minecraft.src.C_507_')
         const pGetX = DeobfRef.methodName(entityCls, 'getX', 'method_23317', 'm_20185_')
         const pGetZ = DeobfRef.methodName(entityCls, 'getZ', 'method_23321', 'm_20189_')
         const MINI_MAX_DIST = 128
-        return this.builder({
-            name: name, extend: I.MiniProvider,
-            fields: [`private ${I.Iterator} iterator = ${I.Collections}.emptyIterator();`],
+        return this.load(name) ?? this.builder({
+            name: name, extend: extend,
+            fields: [`public ${Iterator} iterator = ${Collections}.emptyIterator();`],
             constructors: [`public ${name}() { super(); }`],
             methods: [
-                `public void begin(${I.MiniLoc} location, ${I.Object} ctx) {
+                // `public void begin(${location} loc, ${Object} ctx) {
+                //     this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
+                // }`,
+                `public void begin(${location} location, ${Object} ctx) {
                     ${context} context = (${context}) ctx;
-                    if (location != ${I.MiniLoc}.OVER_MINIMAP) {
-                        this.iterator = ${I.Collections}.emptyIterator();
+                    if (location != ${location}.OVER_MINIMAP) {
+                        this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
                         return;
                     }
-                    ${I.ArrayList} filtered = new ${I.ArrayList}();
-                    ${mcCls} mc = ${mcCls}.${mcGet}();
+                    ${ArrayList} filtered = new ${ArrayList}();
+                    ${Minecraft} mc = ${Minecraft}.${mcGet}();
                     if (mc != null && mc.${mcPlayerField} != null) {
                         double px = mc.${mcPlayerField}.${pGetX}();
                         double pz = mc.${mcPlayerField}.${pGetZ}();
                         double maxDistSq = java.lang.Math.pow(${MINI_MAX_DIST} * 1.0, 2.0);
-                        ${I.ArrayList} elements = context.elements;
+                        ${ArrayList} elements = context.elements;
                         for (int i = 0; i < elements.size(); i++) {
                             ${element} el = (${element}) elements.get(i);
                             if (el == null) continue;
@@ -349,71 +342,75 @@ class ModBuilder {
                     }
                     this.iterator = filtered.iterator();
                 }`,
-                `public boolean hasNext(${I.MiniLoc} location, ${I.Object} ctx) {
-                    return location == ${I.MiniLoc}.OVER_MINIMAP && this.iterator.hasNext(); }`,
-                `public ${I.Object} getNext(${I.MiniLoc} location, ${I.Object} ctx) {
-                    return this.iterator.hasNext() ? (${element}) this.iterator.next() : null; }`,
-                `public void end(${I.MiniLoc} location, ${I.Object} ctx) {
-                    this.iterator = ${I.Collections}.emptyIterator(); }`,
+                `public boolean hasNext(${location} loc, ${Object} ctx) {
+                    return this.iterator.hasNext();
+                }`,
+                `public ${Object} getNext(${location} loc, ${Object} ctx) {
+                    return this.iterator.hasNext() ? this.iterator.next() : null;
+                }`,
+                `public void end(${location} loc, ${Object} ctx) {
+                    this.iterator = ${Collections}.emptyIterator();
+                }`,
             ]
         })
     }
-    static createMinimapReaderClass() {
-        const name = this.MINIMAP.Reader
-        const I = this.IMPORT
-        let element = this.className(this.ELEMENT)
-        let context = this.className(this.MINIMAP.Context)
-        return this.builder({
-            name: name, extend: I.MiniReader,
+    static createReaderClass(name, extend, location) {
+        const { Object, String, Minecraft } = this.IMPORT
+        let elm = this.className(this.Element)
+        let ctx = this.className(this.Context)
+        return this.load(name) ?? this.builder({
+            name: name, extend: extend,
             constructors: [`public ${name}() { super(); }`],
             methods: [
-                `public boolean isHidden(${I.Object} e, ${I.Object} c) { return e == null; }`,
-                `public double getRenderX(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerX(); }`,
-                `public double getRenderY(${I.Object} e, ${I.Object} c, float p) { return 0.0; }`,
-                `public double getRenderZ(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerZ(); }`,
-                `public int getInteractionBoxLeft(${I.Object} e, ${I.Object} c, float p) {
-                    return (int) (-((${element}) e).radius * ((${context}) c).scale); }`,
-                `public int getInteractionBoxRight(${I.Object} e, ${I.Object} c, float p) {
-                    return (int) (((${element}) e).radius * ((${context}) c).scale); }`,
-                `public int getInteractionBoxTop(${I.Object} e, ${I.Object} c, float p) {
-                    return (int) (-((${element}) e).radius * ((${context}) c).scale); }`,
-                `public int getInteractionBoxBottom(${I.Object} e, ${I.Object} c, float p) {
-                    return (int) (((${element}) e).radius * ((${context}) c).scale); }`,
-                `public int getRenderBoxLeft(${I.Object} e, ${I.Object} c, float p) {
-                    return -((${element}) e).radius; }`,
-                `public int getRenderBoxRight(${I.Object} e, ${I.Object} c, float p) {
-                    return ((${element}) e).radius; }`,
-                `public int getRenderBoxTop(${I.Object} e, ${I.Object} c, float p) {
-                    return -((${element}) e).radius; }`,
-                `public int getRenderBoxBottom(${I.Object} e, ${I.Object} c, float p) {
-                    return ((${element}) e).radius; }`,
-                `public int getLeftSideLength(${I.Object} e, ${I.Minecraft} mc) { return 16; }`,
-                `public ${I.String} getMenuName(${I.Object} e) { return ""; }`,
-                `public ${I.String} getFilterName(${I.Object} e) { return ""; }`,
-                `public int getMenuTextFillLeftPadding(${I.Object} e) { return 0; }`,
-                `public int getRightClickTitleBackgroundColor(${I.Object} e) { return 0; }`,
-                `public boolean shouldScaleBoxWithOptionalScale() { return true; }`,
-                `public float getBoxScale(${I.MiniLoc} loc, ${I.Object} e, ${I.Object} c) {
-                    return (float) ((${context}) c).scale; }`,
+                `public boolean isHidden(${Object} e, ${Object} c) { return e == null; }`,
+                `public double getRenderX(${Object} e, ${Object} c, float p) { return ((${elm}) e).centerX(); }`,
+                `public double getRenderY(${Object} e, ${Object} c, float p) { return 0.0; }`,
+                `public double getRenderZ(${Object} e, ${Object} c, float p) { return ((${elm}) e).centerZ(); }`,
+                `public int getInteractionBoxLeft(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxRight(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxTop(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxBottom(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getRenderBoxLeft(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getRenderBoxRight(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getRenderBoxTop(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getRenderBoxBottom(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getLeftSideLength(${Object} e, ${Minecraft} mc) { return ((${elm}) e).size; }`,
+                `public ${String} getMenuName(${Object} e) { return ((${elm}) e).displayName(); }`,
+                `public ${String} getFilterName(${Object} e) { return this.getMenuName(e); }`,
+                `public int getMenuTextFillLeftPadding(${Object} e) { return 0; }`,
+                `public int getRightClickTitleBackgroundColor(${Object} e) { return ((${elm}) e).color; }`,
+                `public boolean shouldScaleBoxWithOptionalScale() { return false; }`,
+                `public float getBoxScale(${location} loc, ${Object} e, ${Object} c) { return (float) ((${ctx}) c).scale; }`,
+                `public boolean isInteractable(${location} location, ${Object} element) { return true; }`,
             ]
         })
+    }
+    // ==================== 小地图 ====================
+    static createMinimapProviderClass() {
+        return this.createProviderClass(this.MINIMAP.Provider,
+            this.IMPORT.MiniProvider, this.IMPORT.MiniLocation)
+    }
+    static createMinimapReaderClass() {
+        return this.createReaderClass(this.MINIMAP.Reader,
+            this.IMPORT.MiniReader, this.IMPORT.MiniLocation)
     }
     static createMinimapRendererClass() {
         const name = this.MINIMAP.Renderer
         const I = this.IMPORT
-        let element = this.className(this.ELEMENT)
-        let context = this.className(this.MINIMAP.Context)
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
         let reader = this.className(this.MINIMAP.Reader)
         let provider = this.className(this.MINIMAP.Provider)
-        return this.builder({
+        return this.load(name) ?? this.builder({
             name: name, extend: I.MiniRenderer,
             constructors: [`public ${name}(${context} ctx) { super(new ${reader}(), new ${provider}(), ctx); }`],
             methods: [
-                `public boolean shouldRender(${I.MiniLoc} loc) {
-                    return loc == ${I.MiniLoc}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
+                `public boolean shouldRender(${I.MiniLocation} loc) {
+                    return loc == ${I.MiniLocation}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
                 `public int getOrder() { return 100; }`,
                 `public void preRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {
-                    ((${context}) this.context).update(info); }`,
+                    ((${context}) this.context).scale = xaero.common.HudMod.INSTANCE.getMinimap().getMinimapFBORenderer().getZoom();
+                }`,
                 `public void postRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {}`,
                 `public boolean renderElement(
                         ${I.Object} el, boolean hovered, boolean highlighted, double depth, float screenSizeBasedScale,
@@ -425,15 +422,14 @@ class ModBuilder {
                     double scale = ((${context}) this.context).scale;
                     if (!${I.Double}.isFinite(scale) || scale <= 0.0 || scale > 64.0) scale = 1.0;
                     try {
-                        ${I.Object}[] args = new ${I.Object}[8];
+                        ${I.Object}[] args = new ${I.Object}[7];
                         args[0] = graphics;
                         args[1] = e;
                         args[2] = ${I.Double}.valueOf(localX);
                         args[3] = ${I.Double}.valueOf(localY);
                         args[4] = info;
                         args[5] = ${I.Double}.valueOf(scale);
-                        args[6] = ${I.Boolean}.valueOf(hovered);
-                        args[7] = ${I.Boolean}.FALSE;
+                        args[6] = ${I.Boolean}.FALSE;
                         ${I.Object} result = e.render.apply(args);
                         return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
                     } catch (${I.Throwable} t) {
@@ -443,83 +439,23 @@ class ModBuilder {
             ]
         })
     }
-    static createWorldMapContextClass() {
-        const name = this.WORLDMAP.Context
-        const I = this.IMPORT
-        return this.builder({
-            name: name,
-            fields: [
-                `public ${I.ArrayList} elements = new ${I.ArrayList}();`,
-                `public ${I.MiniLoc} location = ${I.MiniLoc}.UNKNOWN;`,
-                `public double scale = 1.0;`,
-                `public boolean enabled = true;`,
-            ],
-            constructors: [`public ${name}() { super(); }`]
-        })
-    }
-    static createWorldMapProviderClass() {
-        const name = this.WORLDMAP.Provider
-        const I = this.IMPORT
-        let context = this.className(this.WORLDMAP.Context)
-        return this.builder({
-            name: name, extend: I.WorldProvider,
-            fields: [`private ${I.Iterator} iterator = ${I.Collections}.emptyIterator();`],
-            constructors: [`public ${name}() { super(); }`],
-            methods: [
-                `public void begin(${I.WorldLoc} location, ${I.Object} ctx) {
-                    this.iterator = new ${I.ArrayList}(((${context}) ctx).elements).iterator(); }`,
-                `public boolean hasNext(${I.WorldLoc} location, ${I.Object} ctx) { return this.iterator.hasNext(); }`,
-                `public ${I.Object} getNext(${I.WorldLoc} location, ${I.Object} ctx) {
-                    return this.iterator.hasNext() ? this.iterator.next() : null; }`,
-                `public void end(${I.WorldLoc} location, ${I.Object} ctx) {
-                    this.iterator = ${I.Collections}.emptyIterator(); }`,
-            ]
-        })
-    }
-    static createWorldMapReaderClass() {
-        const name = this.WORLDMAP.Reader
-        const I = this.IMPORT
-        let element = this.className(this.ELEMENT)
-        let context = this.className(this.WORLDMAP.Context)
-        return this.builder({
-            name: name, extend: I.WorldReader,
-            constructors: [`public ${name}() { super(); }`],
-            methods: [
-                `public boolean isHidden(${I.Object} e, ${I.Object} c) { return e == null; }`,
-                `public double getRenderX(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerX(); }`,
-                `public double getRenderZ(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerZ(); }`,
-                `public int getInteractionBoxLeft(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
-                `public int getInteractionBoxRight(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
-                `public int getInteractionBoxTop(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
-                `public int getInteractionBoxBottom(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
-                `public int getRenderBoxLeft(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
-                `public int getRenderBoxRight(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
-                `public int getRenderBoxTop(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
-                `public int getRenderBoxBottom(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
-                `public int getLeftSideLength(${I.Object} e, ${I.Minecraft} mc) { return 16; }`,
-                `public ${I.String} getMenuName(${I.Object} e) { return ""; }`,
-                `public ${I.String} getFilterName(${I.Object} e) { return ""; }`,
-                `public int getMenuTextFillLeftPadding(${I.Object} e) { return 0; }`,
-                `public int getRightClickTitleBackgroundColor(${I.Object} e) { return 0; }`,
-                `public boolean shouldScaleBoxWithOptionalScale() { return false; }`,
-            ]
-        })
-    }
     static createWorldMapRendererClass() {
         const name = this.WORLDMAP.Renderer
         const I = this.IMPORT
-        let element = this.className(this.ELEMENT)
-        let context = this.className(this.WORLDMAP.Context)
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
         let reader = this.className(this.WORLDMAP.Reader)
         let provider = this.className(this.WORLDMAP.Provider)
-        return this.builder({
+        return this.load(name) ?? this.builder({
             name: name, extend: I.WorldRenderer,
-            constructors: [`public ${name}(${context} ctx, ${provider} provider, ${reader} reader) { super(ctx, provider, reader); }`],
+            constructors: [`public ${name}(${context} ctx) { super(ctx, new ${provider}(), new ${reader}()); }`],
             methods: [
-                `public boolean shouldRender(${I.WorldLoc} location, boolean shadow) { return true; }`,
+                `public boolean shouldRender(${I.WorldLocation} location, boolean shadow) { return true; }`,
                 `public int getOrder() { return 200; }`,
                 `public boolean shouldBeDimScaled() { return false; }`,
-                `public void preRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {}`,
+                `public void preRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {
+                    ((${context}) this.context).scale = info.scale;
+                }`,
                 `public void postRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {}`,
                 `public void renderElementShadow(${I.Object} e, boolean h, float os, double px, double py,
                     ${I.WorldInfo} info, ${I.GuiGraphics} g, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp) {}`,
@@ -532,17 +468,16 @@ class ModBuilder {
                     if (el == null || el.render == null) return false;
                     if (info == null || graphics == null) return false;
                     try {
-                        double sacle = info.scale;
-                        if (!${I.Double}.isFinite(sacle) || sacle <= 0.0 || sacle > ${I.Float}.MAX_VALUE) sacle = 1.0;
-                        ${I.Object}[] args = new ${I.Object}[8];
+                        double mapScale = info.scale;
+                        if (!${I.Double}.isFinite(mapScale) || mapScale <= 0.0 || mapScale > ${I.Float}.MAX_VALUE) mapScale = 1.0;
+                        ${I.Object}[] args = new ${I.Object}[7];
                         args[0] = graphics;
                         args[1] = el;
                         args[2] = ${I.Double}.valueOf(partialX);
                         args[3] = ${I.Double}.valueOf(partialY);
                         args[4] = info;
-                        args[5] = ${I.Double}.valueOf(sacle);
-                        args[6] = ${I.Boolean}.valueOf(hovered);
-                        args[7] = ${I.Boolean}.TRUE;
+                        args[5] = ${I.Double}.valueOf(mapScale);
+                        args[6] = ${I.Boolean}.TRUE;
                         ${I.Object} result = el.render.apply(args);
                         return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
                     } catch (${I.Throwable} t) {
@@ -552,12 +487,23 @@ class ModBuilder {
             ]
         })
     }
+    // ==================== 世界地图 ====================
+    static createWorldMapProviderClass() {
+        return this.createProviderClass(this.WORLDMAP.Provider,
+            this.IMPORT.WorldProvider, this.IMPORT.WorldLocation)
+    }
+    static createWorldMapReaderClass() {
+        return this.createReaderClass(this.WORLDMAP.Reader,
+            this.IMPORT.WorldReader, this.IMPORT.WorldLocation)
+    }
 }
 /** 渲染层管理器（小地图 + 世界地图） */
 class XaeroOverlayManager {
     constructor() {
-        /** @type {JavaClass|null} 共用 Element 类 */
+        /** @type {JavaClass|null} 共用类 */
         this.ElementCls = null
+        /** @type {JavaClass|null} 共用类 */
+        this.ContextCls = null
 
         /** @type {boolean} 小地图是否已注册 */
         this.minimapInited = false
@@ -585,12 +531,10 @@ class XaeroOverlayManager {
         if (this.minimapInited) return this
         this.minimapHandler = Java.type(ModBuilder.IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
 
-        const contextCls = ModBuilder.createMinimapContextClass()
         ModBuilder.createMinimapProviderClass()
         ModBuilder.createMinimapReaderClass()
         const rendererCls = ModBuilder.createMinimapRendererClass()
-
-        this.minimapContext = Reflection.newInstance(contextCls)
+        this.minimapContext = Reflection.newInstance(this.ContextCls)
         this.minimapRenderer = Reflection.newInstance(rendererCls, this.minimapContext)
         this.minimapHandler.add(this.minimapRenderer)
 
@@ -604,15 +548,11 @@ class XaeroOverlayManager {
         if (this.worldMapInited) return this
         this.worldMapHandler = Java.type(ModBuilder.IMPORT.WorldMap).mapElementRenderHandler
 
-        const contextCls = ModBuilder.createWorldMapContextClass()
-        const providerCls = ModBuilder.createWorldMapProviderClass()
-        const readerCls = ModBuilder.createWorldMapReaderClass()
+        ModBuilder.createWorldMapProviderClass()
+        ModBuilder.createWorldMapReaderClass()
         const rendererCls = ModBuilder.createWorldMapRendererClass()
-
-        this.worldMapContext = Reflection.newInstance(contextCls)
-        const provider = Reflection.newInstance(providerCls)
-        const reader = Reflection.newInstance(readerCls)
-        this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext, provider, reader)
+        this.worldMapContext = Reflection.newInstance(this.ContextCls)
+        this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext)
 
         this.worldMapHandler.add(this.worldMapRenderer)
         this.worldMapInited = true
@@ -623,6 +563,7 @@ class XaeroOverlayManager {
     /** 注册所有渲染层 */
     register() {
         this.ElementCls = ModBuilder.createElementClass()
+        this.ContextCls = ModBuilder.createContextClass()
         this.registerMinimap()
         this.registerWorldMap()
         return this
@@ -659,8 +600,8 @@ class XaeroOverlayManager {
 
     /**
      * 添加一个矿脉元素
-     * @param {number} cx 区块 X
-     * @param {number} cz 区块 Z
+     * @param {number} cx X
+     * @param {number} cz Z
      * @param {number} color ARGB 颜色
      * @param {number} size 尺寸（方块单位，直径）
      * @param {Function} render 元素渲染回调
@@ -737,15 +678,16 @@ class XaeroOverlayManager {
     }
 
     /**
-     * 判断鼠标是否悬停在矿脉上
-     * @param {number} x 矿脉屏幕 X
-     * @param {number} y 矿脉屏幕 Y
-     * @param {number} radius 矿脉半径（方块）
+     * 判断鼠标是否悬停在元素附近
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius 半径
      * @param {number} scale 缩放
      * @returns {boolean}
      */
     static isHovered = (x, y, radius, scale) => {
         let screen = Hud.getOpenScreen()
+        if (!screen) return false
         let ref = Reflection.getReflect(screen)
         let scale_base = Hud.getScaleFactor()
         let width = Hud.getWindowWidth() / scale_base
@@ -753,7 +695,7 @@ class XaeroOverlayManager {
 
         let cameraX = ref.get('cameraX')
         let cameraZ = ref.get('cameraZ')
-        let scale_total = ref.get('scale') / scale_base
+        let scale_total = scale / scale_base
 
         let ox = width / 2 + (x - cameraX) * scale_total
         let oz = height / 2 + (y - cameraZ) * scale_total
@@ -1511,8 +1453,8 @@ function makeVeinRender(entry) {
 
     return JavaWrapper.methodToJava((args) => {
         try {
-            const [graphics, e, localX, localY, rinfo, scale, hovered, isWorldMap] = args
-            if (isWorldMap && scale < 0.5) return true
+            const [graphics, e, localX, localY, rinfo, scale, isWorldMap] = args
+            if (isWorldMap && scale < 0.6) return true
             const r = e.radius * scale
             // 矿脉半径
             const circle = d2dBuilder.imageBuilder()
@@ -1531,8 +1473,9 @@ function makeVeinRender(entry) {
                 .build()
             icon[renderM](graphics, 0, 0, 0)
             // 悬停检测
-            if (isWorldMap && filter_d2d && XaeroOverlayManager.isHovered(e.x, e.z, e.radius, scale))
+            if (isWorldMap && filter_d2d && XaeroOverlayManager.isHovered(e.x, e.z, e.radius, scale)) {
                 hoveredEntry = entry
+            }
         } catch (err) {
             FS.open('log.txt').append(`${err}\n`)
         }
@@ -1668,7 +1611,6 @@ function main() {
         if (!filter_panel || !filter_d2d) return
         filter_panel.tick(event)
         filter_d2d.tooltips = []
-        let screen = Reflection.getReflect(Hud.getOpenScreen())
         if (hoveredEntry) {
             filter_d2d.tooltips = IeMineral.detailsOf(hoveredEntry)
             event.consumed = true

@@ -1,81 +1,59 @@
 // 脚本名称: 沉浸工程矿脉预览
-// 功能介绍: 在Xaero世界地图上显示沉浸工程矿脉
-// 依赖模组: jsmacros、Xaero地图(Xaero's World Map)、沉浸工程(Immersive Engineering)
+// 功能介绍: 借助 Xaero 自定义渲染层，在小地图和世界地图上显示沉浸工程矿脉
+// 依赖模组: jsmacros、Xaero小地图、Xaero世界地图、沉浸工程(Immersive Engineering)
+// 更新内容: v1.0 初始化脚本
+// 更新内容: v1.1 在世界地图添加Draw2D画布，渲染矿脉
+// 更新内容: v1.2 改为注册自定义地图渲染层
 
 const scriptName = 'XareoMap_IEVeins.ToggleScript'
-/**
- * 输出带脚本名前缀的聊天日志
- * @param {string} msg 日志内容
- * @param {number} [color=0x7] 文本颜色
- */
+
 const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
     .append("[").withColor(0x5).append(scriptName).withColor(0x5)
     .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
-
-/** @returns {boolean} 脚本是否处于启用状态 */
 const isToggle = () => GlobalVars.getBoolean(scriptName)
-/**
- * 设置脚本启用状态
- * @param {boolean} v
- */
-const setToggle = (v) => {
-    GlobalVars.putBoolean(scriptName, v)
-    mclog(v ? "启用" : "关闭")
-}
-setToggle(!isToggle())
+const setToggle = (v) => mclog(GlobalVars.putBoolean(scriptName, v) ? "启用" : "关闭")
 
-/** 
- * @typedef {com.mojang.blaze3d.platform.Window} Window
- * @typedef {net.minecraft.network.chat.Component} Component
- * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
- * @typedef {net.minecraft.client.font.TextRenderer} TextRenderer
- * 
- * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Pos2D} type_pos2d
- * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Vec2D} type_vec2d
- * @typedef {{timestamp:number,interval:number,mouse:type_pos2d}} eventCache
- * @typedef {'holding'|'pressed'|'released'} enum_keyState
- * @typedef {(event:Event)=>void} handle_eventCallback
- * @typedef {{
- *  keyPressed: ((keyCode:int,modifiers:int)=>void),
- *  charTyped: ((char:char,modifiers:int)=>void),
- *  mouseDown: ((pos:type_pos2d,button:int,dbclick:boolean)=>void),
- *  mouseUp: ((pos:type_pos2d,button:int,dbclick:boolean)=>void),
- *  mouseDrag: ((vec:type_vec2d,button:int)=>void),
- * }} handle_screenCallback
- * 
- * @typedef {Object} VeinEntry
- * @property {number} x 中心方块 X
- * @property {number} z 中心方块 Z
- * @property {number} radius 半径（方块）
- * @property {string} mineral 矿物名（plainName）
- * @property {number} depletion 已开采量
- * 
- * @typedef {Object} MineralInfo
- * @property {string} key 翻译键
- * @property {string} name plainName
- * @property {string} transName 本地化名称
- * @property {string} background 背景方块 id
- * @property {string[]} dimensions 出现的维度
- * @property {number} weight 权重
- * @property {number} failChance 失败率
- * @property {{stack:string, chance:number}[]} outputs 产出列表
- * @property {{stack:string, chance:number}[]} spoils 废料列表
- * 
- * @typedef {Object} ReadVeinsResult
- * @property {Object<string, VeinEntry[]>} veins 按维度分组的矿脉
- * @property {number} total 矿脉总数
- * @property {List<RecipeHolder<R>>} map 配方集合
- */
+/** @returns {ClientLevel} */
+const clientLevel = () => new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_')
 
 /** 反射工具 @template T */
 class DeobfRef {
-    /** @param {T} v 被反射包装的对象或 Java 类 */
-    constructor(v) {
-        /** @type {T} */
-        this.target = v
-        /** @type {Packages.org.joor.Reflect} */
-        this.reflect = Reflection.getReflect(this.target)
+    /** 探测类名
+     * @param {string[]} names 候选名
+     * @returns {string|null}
+     */
+    static className(...names) {
+        for (const n of names)
+            try { return Reflection.getClass(n).getName() } catch { }
+        return null
     }
+    /**
+     * 探测字段名
+     * @param {string} cls
+     * @param {string[]} names 候选名
+     * @returns {string|null}
+     */
+    static fieldName(cls, ...names) {
+        const fields = Reflection.getClass(cls).getDeclaredFields()
+        for (let n of names)
+            for (let m of fields)
+                if (m.getName() === n) return n
+        return null
+    }
+    /**
+     * 探测方法名
+     * @param {string} cls
+     * @param {string[]} names 候选名
+     * @returns {string|null}
+     */
+    static methodName(cls, ...names) {
+        const methods = Reflection.getClass(cls).getDeclaredMethods()
+        for (let n of names)
+            for (let m of methods)
+                if (m.getName() === n) return n
+        return null
+    }
+
     /**
      * 按顺序尝试加载类，返回第一个成功的
      * @template {string} C
@@ -94,15 +72,24 @@ class DeobfRef {
      * @returns {DeobfRef<C>|null}
      */
     static Class(...class_names) {
-        let type = DeobfRef.Type(...class_names)
-        return type ? new DeobfRef(type) : null
+        let type = this.Type(...class_names)
+        return type ? new this(type) : null
     }
+
+    /** @param {T} v 被反射包装的对象或 Java 类 */
+    constructor(v) {
+        /** @type {T} */
+        this.target = v
+        /** @type {Packages.org.joor.Reflect} */
+        this.reflect = Reflection.getReflect(this.target)
+    }
+
     /** @returns {string} 类名 */
     get classname() { return Reflection.getClassName(this.target) }
     /** @returns {GetJava.Type$Graal<T>} Graal 版 Java 类 */
-    get type() { return Java.type(Reflection.getClassName(this.target)) }
+    get type() { return Java.type(this.classname) }
     /** @returns {JavaClass<T>} 反射版 Java 类 */
-    get class() { return Reflection.getClass(Reflection.getClassName(this.target)) }
+    get class() { return Reflection.getClass(this.classname) }
     /** @returns {string[]} 所有字段名（缓存） */
     get fields() { return this._fields ??= this.class.getDeclaredFields().map(v => v.getName()) }
     /** @returns {string[]} 所有方法名（缓存） */
@@ -115,7 +102,7 @@ class DeobfRef {
      * @param {string[]} names 候选字段名（按优先级）
      * @returns {string|null}
      */
-    getFieldName(...names) {
+    fieldName(...names) {
         let fields = this.fields
         for (let name of names)
             if (fields.includes(name)) return name
@@ -127,7 +114,7 @@ class DeobfRef {
      * @returns {*} 字段值；未找到返回 null
      */
     get(...names) {
-        let name = this.getFieldName(...names)
+        let name = this.fieldName(...names)
         if (name)
             try { return this.reflect.field(name).get() }
             catch { return this.target[name] }
@@ -140,7 +127,7 @@ class DeobfRef {
      * @returns {*} 设置后的字段值；未找到返回 null
      */
     set(value, ...names) {
-        let name = this.getFieldName(...names)
+        let name = this.fieldName(...names)
         if (name)
             try { return this.reflect.set(name, value).get() }
             catch {
@@ -154,7 +141,7 @@ class DeobfRef {
      * @param {string[]} method_names 候选方法名（按优先级）
      * @returns {string|null}
      */
-    getMethodName(...method_names) {
+    methodName(...method_names) {
         let methods = this.methods
         for (let name of method_names)
             if (methods.includes(name))
@@ -183,501 +170,605 @@ class DeobfRef {
      * @returns {*} 方法返回值；未找到返回 null
      */
     call(method_names, ...args) {
-        let name = this.getMethodName(...method_names)
+        let name = this.methodName(...method_names)
         return name ? this.invoke(name, ...args) : null
     }
 }
 
-/** 
- * @typedef {{x:int,y:int,width:int,height:int}} Region 显示区域
- * Draw2D拓展：支持裁剪画布+渲染提示框 
- */
-class Draw2DUtils {
-    /** @type {DeobfRef<org.lwjgl.glfw.GLFW>} */
-    static GLFW = DeobfRef.Class('org.lwjgl.glfw.GLFW')
-    /** @type {DeobfRef<Window>} */
-    static Window = new DeobfRef(new DeobfRef(Client.getMinecraft()).call(['getWindow', 'method_22683', 'm_91268_']))
-    /**
-     * @enum {int}
-     * @link https://github.com/LWJGL/lwjgl3/blob/master/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java
-     */
-    static CursorTypes = {
-        DEFAULT: 0x36001, ARROW: 0x36001, IBEAM: 0x36002, CROSSHAIR: 0x36003,
-        POINTING_HAND: 0x36004, RESIZE_EW: 0x36005, RESIZE_NS: 0x36006,
-        RESIZE_NWSE: 0x36007, RESIZE_NESW: 0x36008, RESIZE_ALL: 0x36009,
-        NOT_ALLOWED: 0x3600A, HRESIZE: 0x36005, VRESIZE: 0x36006, HAND: 0x36004
-    }
-    /** @type {TextRenderer} */
-    static TextRenderer = new DeobfRef(Client.getMinecraft())
-        .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
-    /** @type {JavaClass<Draw2D>} */
-    static Draw2D = Reflection.getClass(
-        'xyz.wagyourtail.jsmacros.client.api.classes.render.Draw2D',
-        'com.jsmacrosce.jsmacros.client.api.classes.render.Draw2D')
-    /** @type {DeobfRef<DrawContext>} */
-    static DrawContext = DeobfRef.Class(
-        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
-        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
-    /** @type {DeobfRef<com.mojang.blaze3d.platform.cursor.CursorType>} */
-    static CursorType = DeobfRef.Class(
-        'com.mojang.blaze3d.platform.cursor.CursorType', 'net.minecraft.class_11875',
-        'net.minecraft.client.gui.cursor.Cursor', 'net.minecraft.src.C_411411_')
+/** 动态类构建工厂（小地图 + 世界地图） */
+class ModBuilder {
+    static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
+    static namespace = 'IeVeinOverlay'
+    static suffix = '' + `_${Date.now()}`
 
-    /**
-     * 创建限制显示范围画布
-     * @param {Region} region 显示区域
-     * @param {(drawContext:DrawContext) => void} [onrender] 每帧渲染回调
-     * @returns {Draw2D} 裁剪后的 Draw2D
-     */
-    static createDraw2D(region, onrender) {
-        let builder = Reflection.createClassProxyBuilder(Draw2DUtils.Draw2D)
-        let on = Draw2DUtils.DrawContext.getMethodName('enableScissor', 'method_44379', 'm_280588_')
-        let off = Draw2DUtils.DrawContext.getMethodName('disableScissor', 'method_44380', 'm_280618_')
-        if (on && off) {
-            builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
-                let dcref = new DeobfRef(args[0])
-                dcref.call(['flush', 'method_51452', 'draw', 'm_280262_'])
-                let { x, y, width, height } = region
-                dcref.invoke(on, x | 0, y | 0, (x + width) | 0, (y + height) | 0)
-                let result = proxyRef.parent(args)
-                dcref.invoke(off)
-                onrender && onrender(...args)
-                return result
-            }))
-            let proxy = builder.buildInstance([])
-            proxy.widthSupplier = () => region.width
-            proxy.heightSupplier = () => region.height
-            return proxy
-        }
-        return Hud.createDraw2D()
+    /** 共用 Element 短名 */
+    static ELEMENT = `${this.namespace}_Element${this.suffix}`
+    /** 小地图短名 */
+    static MINIMAP = {
+        Context: `${this.namespace}_MiniContext${this.suffix}`,
+        Provider: `${this.namespace}_MiniProvider${this.suffix}`,
+        Reader: `${this.namespace}_MiniReader${this.suffix}`,
+        Renderer: `${this.namespace}_MiniRenderer${this.suffix}`,
     }
-    /**
-     * 设置鼠标样式
-     * @param {keyof typeof Draw2DUtils.CursorTypes} name 样式名称
-     * @param {DrawContext|null} [drawContext=null] 画板
-     */
-    static selectCursor(name, drawContext) {
-        let shape = Draw2DUtils.CursorTypes[name]
-        if (drawContext && Draw2DUtils.CursorType) {
-            if (name == 'DEFAULT') return
-            let DEFAULT = Draw2DUtils.CursorType.get('DEFAULT', 'field_62449', 'f_412642_')
-            let createStandardCursor = Draw2DUtils.CursorType.getMethodName(
-                'createStandardCursor', 'method_74031', 'createStandard', 'm_416152_')
-            createStandardCursor && new DeobfRef(drawContext).call(
-                ['requestCursor', 'method_74037', 'setCursor', 'm_417638_'],
-                Draw2DUtils.CursorType.invoke(createStandardCursor, shape, name, DEFAULT)
-            )
-            return
-        }
-        Draw2DUtils.GLFW.invoke(
-            'glfwSetCursor',
-            Draw2DUtils.Window.get('window', 'field_5187', 'handle', 'f_85349_', 'f_413219_'),
-            Draw2DUtils.GLFW.invoke('glfwCreateStandardCursor', shape))
+    /** 世界地图短名 */
+    static WORLDMAP = {
+        Context: `${this.namespace}_WorldContext${this.suffix}`,
+        Provider: `${this.namespace}_WorldProvider${this.suffix}`,
+        Reader: `${this.namespace}_WorldReader${this.suffix}`,
+        Renderer: `${this.namespace}_WorldRenderer${this.suffix}`,
     }
-    /**
-     * 绘制气泡提示框
-     * @param {DrawContext} drawContext 画板
-     * @param {int} x 坐标
-     * @param {int} y 坐标
-     * @param {JavaArray<Component>} components 格式化文本列表
-     */
-    static renderToolTip(drawContext, x, y, components) {
-        if (drawContext) {
-            let method = [
-                'setComponentTooltipForNextFrame', 'renderComponentTooltip',
-                'method_51434', 'drawTooltip', 'm_403688_', 'm_280666_'
-            ]
-            let dcref = new DeobfRef(drawContext)
-            try {
-                dcref.call(method, Draw2DUtils.TextRenderer, components, Math.round(x), Math.round(y))
-                dcref.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
-            } catch {
-                dcref.call(method, Draw2DUtils.TextRenderer, components, Math.round(x), Math.round(y),
-                    Player.getPlayer().getMainHand().getRaw())
-            }
-        }
+    /** 长类名集中管理 */
+    static IMPORT = {
+        // === Java 标准 ===
+        Object: 'java.lang.Object',
+        Double: 'java.lang.Double',
+        Boolean: 'java.lang.Boolean',
+        Float: 'java.lang.Float',
+        String: 'java.lang.String',
+        ArrayList: 'java.util.ArrayList',
+        Collections: 'java.util.Collections',
+        Iterator: 'java.util.Iterator',
+        Function: 'java.util.function.Function',
+        Throwable: 'java.lang.Throwable',
+        GuiGraphics: DeobfRef.className(
+            'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
+            'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_'),
+        BufferSource: DeobfRef.className(
+            'net.minecraft.client.renderer.MultiBufferSource$BufferSource', 'net.minecraft.class_4597$class_4598',
+            'net.minecraft.client.render.VertexConsumerProvider$Immediate', 'net.minecraft.src.C_4139_$C_4140_'),
+        Minecraft: DeobfRef.className(
+            'net.minecraft.client.Minecraft', 'net.minecraft.class_310',
+            'net.minecraft.client.MinecraftClient', 'net.minecraft.src.C_3391_'),
+        Renderable: DeobfRef.className(
+            'net.minecraft.client.gui.components.Renderable', 'net.minecraft.class_4068',
+            'net.minecraft.client.gui.Drawable', 'net.minecraft.src.C_252359_'),
+        // === Xaero 小地图 ===
+        Minimap: 'xaero.minimap.XaeroMinimap',
+        MiniLoc: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
+        MiniInfo: 'xaero.hud.minimap.element.render.MinimapElementRenderInfo',
+        MiniProvider: 'xaero.hud.minimap.element.render.MinimapElementRenderProvider',
+        MiniReader: 'xaero.hud.minimap.element.render.MinimapElementReader',
+        MiniRenderer: 'xaero.hud.minimap.element.render.MinimapElementRenderer',
+        MiniRendererHandler: 'xaero.hud.minimap.element.render.MinimapElementRendererHandler',
+        MiniFBO: 'xaero.common.minimap.render.MinimapFBORenderer',
+        MiniTextureProvider: 'xaero.common.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
+        // === Xaero 世界地图 ===
+        WorldMap: 'xaero.map.WorldMap',
+        WorldLoc: 'xaero.map.element.render.ElementRenderLocation',
+        WorldInfo: 'xaero.map.element.render.ElementRenderInfo',
+        WorldProvider: 'xaero.map.element.render.ElementRenderProvider',
+        WorldReader: 'xaero.map.element.render.ElementReader',
+        WorldRenderer: 'xaero.map.element.render.ElementRenderer',
+        WorldTextureProvider: 'xaero.map.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
     }
 
-    /**
-     * @param {Region} region 区域
-     * @param {(self:Draw2DUtils,drawContext:DrawContext) => void} onrender 渲染事件
+    static load(name) { try { return Reflection.getClassFromClassBuilderResult(name) } catch { return null } }
+    static className(name) { return this.package + name }
+    /** 构建类
+     * @template {string} C
+     * @param {{
+     *  name:C, extend:string, imports:Record<string,string>,
+     *  fields:string[], constructors:string[], methods:string[]
+     * }} opts 
+     * @returns {JavaClass<C>}
      */
-    constructor(region, onrender) {
-        /** @type {Region} 区域 */
-        this.region = region
-        /** @type {(self:Draw2DUtils,drawContext:DrawContext) => void} 渲染事件 */
-        this.onrender = onrender
-        /** @type {Draw2D} */
-        this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
-        /** @type {keyof typeof Draw2DUtils.CursorTypes} 鼠标样式 */
-        this.cursor = 'DEFAULT'
-        /** @type {string[]} 提示框内容 */
-        this.tooltips = []
-        /** @type {null|((self:Draw2DUtils) => string[])} */
-        this.dynamicTooltips = null
+    static builder(opts) {
+        const { name, extend, fields, constructors, methods } = opts
+        let exist = this.load(name)
+        if (exist) return exist
+
+        let builder = Reflection.createClassBuilder(name, Java.type(extend ?? 'java.lang.Object'))
+        fields && fields?.forEach(v => builder.addField(v))
+        constructors && constructors?.forEach(v => builder.addConstructor(v))
+        methods && methods?.forEach(v => builder.addMethod(v))
+        return builder.finishBuildAndFreeze()
     }
-    /** @returns {JavaArray<Component>} 气泡提示框内容组件 */
-    getToolTipComponents() {
-        let arr = JavaUtils.createArrayList()
-        for (let v of this.tooltips)
-            arr.add(Chat.createTextHelperFromString(v).getRaw())
-        return arr
-    }
-    /** @param {DrawContext} drawContext */
-    render(drawContext) {
-        this.onrender && this.onrender(this, drawContext)
-        if (this.cursor)
-            Draw2DUtils.selectCursor(this.cursor, drawContext)
-        if (this.dynamicTooltips)
-            this.tooltips = this.dynamicTooltips(this)
-        if (this.tooltips.length > 0) {
-            let components = this.getToolTipComponents()
-            Draw2DUtils.renderToolTip(drawContext, Hud.getMouseX(), Hud.getMouseY(), components)
-        }
-    }
-    /** @param {string[]|(self:Draw2DUtils) => string[]} v */
-    setTooltip(v) { typeof v == 'function' ? this.dynamicTooltips = v : this.tooltips = v }
-    /** 清除提示框 */
-    removeTooltip() { this.tooltips = []; this.dynamicTooltips = null }
-}
 
-/** @type {any|null} OpenScreen 监听 id */
-let screen_listener = null
-
-/** Xaero 世界地图屏幕的坐标转换封装 */
-class GuiMap {
-    /** @param {IScreen} screen */
-    constructor(screen) {
-        /** @type {IScreen} */
-        this.raw = screen
-        /** @type {Packages.org.joor.Reflect} */
-        this.target = Reflection.getReflect(screen)
-    }
-    /** @returns {number} 屏幕宽（GUI 缩放坐标） */
-    get width() { return this.raw.getWidth() }
-    /** @returns {number} 屏幕高（GUI 缩放坐标） */
-    get height() { return this.raw.getHeight() }
-    /** @returns {number} 地图缩放比例 */
-    get mapScale() { return this.target.get('scale') }
-    /** @returns {number} 鼠标所在方块 X 坐标 */
-    get mouseBlockPosX() { return this.target.get('mouseBlockPosX') }
-    /** @returns {number} 鼠标所在方块 Y 坐标 */
-    get mouseBlockPosY() { return this.target.get('mouseBlockPosY') }
-    /** @returns {number} 鼠标所在方块 Z 坐标 */
-    get mouseBlockPosZ() { return this.target.get('mouseBlockPosZ') }
-    /** @returns {type_pos2d} 鼠标所在方块坐标 */
-    get mouseBlockPos() { return PositionCommon.createPos(this.mouseBlockPosX, this.mouseBlockPosY, this.mouseBlockPosZ) }
-    /** @returns {string} 鼠标所在维度 */
-    get mouseBlockDim() { return this.target.get('mouseBlockDim') }
-    /** @returns {number} 相机中心世界 X 坐标 */
-    get cameraX() { return this.target.get('cameraX') }
-    /** @returns {number} 相机中心世界 Z 坐标 */
-    get cameraZ() { return this.target.get('cameraZ') }
-
-    /** @returns {number} 每世界方块对应的屏幕像素 */
-    scale() { return this.mapScale / Hud.getScaleFactor() }
-    /**
-     * 世界长度 → 屏幕像素
-     * @param {number} [length=1]
-     * @returns {number}
-     */
-    toSize(length = 1) { return length * this.scale() }
-    /**
-     * 世界 X → 屏幕 X
-     * @param {number} x
-     * @returns {number}
-     */
-    toX(x) { return Math.round(this.width / 2 + this.toSize(x - this.cameraX)) }
-    /**
-     * 世界 Z → 屏幕 Y
-     * @param {number} y
-     * @returns {number}
-     */
-    toY(y) { return Math.round(this.height / 2 + this.toSize(y - this.cameraZ)) }
-    /**
-     * 世界长度 → 屏幕整数像素
-     * @param {number} [length=1]
-     * @returns {number}
-     */
-    toLength(length = 1) { return Math.round(this.toSize(length)) }
-    /** @returns {number} 鼠标屏幕 X */
-    mouseX() { return this.toX(this.mouseBlockPosX) }
-    /** @returns {number} 鼠标屏幕 Y */
-    mouseY() { return this.toY(this.mouseBlockPosZ) }
-    /**
-     * 屏幕坐标是否在屏幕内
-     * @param {number} x
-     * @param {number} y
-     * @returns {boolean}
-     */
-    isInBounds(x, y) { return x > 0 && y > 0 && x < this.width && y < this.height }
-}
-
-/** @type {JavaClass<ExcavatorHandler>} */
-const ExcavatorHandler = Java.type('blusunrize.immersiveengineering.api.excavator.ExcavatorHandler')
-/** @type {JavaClass<MineralMix>} */
-const MineralMix = Java.type('blusunrize.immersiveengineering.api.excavator.MineralMix')
-
-/** @returns {ServerLevel} 主世界 ServerLevel */
-function getServerLevel() {
-    const mc = Client.getMinecraft()
-    const server = Reflection.getClass('net.minecraft.client.Minecraft')
-        .getDeclaredMethod('m_91092_').invoke(mc)
-    return Reflection.getClass('net.minecraft.server.MinecraftServer')
-        .getDeclaredMethod('m_129783_').invoke(server)
-}
-
-/** @returns {ClientLevel} 主世界 ClientLevel */
-function getClientLevel() {
-    const mc = Client.getMinecraft()
-    return new DeobfRef(mc).get('level', 'field_1687', 'world', 'f_91073_')
-}
-
-/**
- * 列出矿物配方
- * @param {Level} level
- * @returns {List<RecipeHolder<R>>} 配方集合
- */
-function listMineralRecipes(level) {
-    const RECIPES = MineralMix?.RECIPES
-    if (RECIPES)
-        return RECIPES.getRecipes(level)
-    return null
-}
-
-/**
- * 读取当前世界所有矿脉
- * @returns {ReadVeinsResult}
- */
-function readVeins() {
-    const level = getClientLevel()
-    const veinList = ExcavatorHandler.getMineralVeinList()
-    const veins = {}
-    let total = 0
-
-    const keys = veinList.keySet().iterator()
-    while (keys.hasNext()) {
-        const key = keys.next()
-        const dim = `${new DeobfRef(key).get('location', 'field_25138', 'value', 'f_135777_')}`
-        const arr = []
-        const it = veinList.get(key).iterator()
-        while (it.hasNext()) {
-            const v = it.next()
-            const pos = v.getPos()
-            const mineral = v.getMineral(level)
-            arr.push({
-                x: pos.f_140723_(),
-                z: pos.f_140724_(),
-                radius: v.getRadius(),
-                mineral: mineral.getPlainName(),
-                depletion: v.getDepletion()
-            })
-        }
-        veins[dim] = arr
-        total += arr.length
-    }
-    return { veins, total, map: listMineralRecipes(level) }
-}
-
-/**
- * 把配方列表转成 {plainName: {...}} 映射
- * @param {List<RecipeHolder<R>>} recipes
- * @returns {Object<string, MineralInfo>}
- */
-function readMineralMap(recipes) {
-    const mineral_map = {}
-    recipes.forEach(v => {
-        let name = v.getPlainName()
-        let key = v.getTranslationKey()
-        mineral_map[name] = {
-            key: key,
+    static createElementClass() {
+        const name = this.ELEMENT
+        const I = this.IMPORT
+        return this.builder({
             name: name,
-            transName: Chat.createTextHelperFromTranslationKey(key).getString().trim(),
-            background: `${JavaUtils.getHelperFromRaw(v.background).getId()}`,
-            dimensions: Array.from(v.dimensions).map(d =>
-                `${new DeobfRef(d).get('location', 'field_25138', 'value', 'f_135777_')}`),
-            weight: v.weight,
-            failChance: v.failChance,
-            outputs: Array.from(v.outputs).map(o => ({
-                stack: JavaUtils.getHelperFromRaw(o.stack().get()).getItemId(),
-                chance: o.chance()
-            })),
-            spoils: Array.from(v.spoils).map(s => ({
-                stack: JavaUtils.getHelperFromRaw(s.stack().get()).getItemId(),
-                chance: s.chance()
-            })),
-        }
-    })
-    return mineral_map
-}
-
-/** 矿脉标记 */
-class IeMineral {
-    /** @type {Object<string, MineralInfo & {texture:{icon:string,color:number,circle:CustomImage}, visiable:boolean}} */
-    static MINERAL_MAP = {
-        none: {
-            texture: {
-                icon: 'minecraft:stone',
-                color: 0xFFFFFF,
-                circle: Hud.createTexture(64, 64, 'ie_mineral_canvas_none').update()
-            }
-        }
-    }
-    /** @type {number} 单矿脉最大储量 */
-    static MAX = 38400
-
-    /**
-     * 初始化矿物配方与纹理
-     * @param {Object<string, MineralInfo>} recipes
-     * @param {number} maxYield 单矿脉最大储量
-     */
-    static init(recipes, maxYield) {
-        Object.entries(recipes).forEach(([key, info], i) => {
-            let texture = IeMineral.MINERAL_MAP[key]?.texture
-            if (!texture) {
-                let color = (((i * 137) % 360) << 16) | (((i * 73) % 255) << 8) | ((i * 41) % 255)
-                let radius = 512
-                let d = 8
-                texture = {
-                    icon: info.outputs.sort((a, b) => b.chance - a.chance)[0].stack,
-                    color: color,
-                    circle: Hud.createTexture(radius, radius, `ie_mineral_canvas_${key}`)
-                        .setGraphicsColor(color)
-                        .fillOval(0, 0, radius - 1, radius - 1)
-                        .setGraphicsColor(0x121212)
-                        .fillOval(d, d, radius - 1 - d * 2, radius - 1 - d * 2)
-                        .update()
-                }
-            }
-            IeMineral.MINERAL_MAP[key] = Object.assign({}, info, { texture, visiable: false })
+            fields: [
+                `public int x;`,
+                `public int z;`,
+                `public int color = 0x80FF0000;`,
+                `public int size = 16;`,
+                `public int radius = 8;`,
+                `public int depletion = 0;`,
+                `public String mineral = "";`,
+                `public String icon = "minecraft:stone";`,
+                `public ${I.Function} render = null;`,
+            ],
+            constructors: [`public ${name}(int x, int z, int color, int size, ${I.Function} render) {
+                this.x = x; this.z = z; this.color = color; this.size = size; this.render = render;
+            }`],
+            methods: [
+                `public double centerX() { return (double) this.x + 0.5; }`,
+                `public double centerZ() { return (double) this.z + 0.5; }`,
+            ]
         })
-        IeMineral.MAX = maxYield
+    }
+    static createMinimapContextClass() {
+        const name = this.MINIMAP.Context
+        const I = this.IMPORT
+        return this.builder({
+            name: name,
+            fields: [
+                `public ${I.ArrayList} elements = new ${I.ArrayList}();`,
+                `public ${I.MiniLoc} location = ${I.MiniLoc}.UNKNOWN;`,
+                `public double scale = 1.0;`,
+                `public boolean enabled = true;`,
+            ],
+            constructors: [`public ${name}() { super(); }`],
+            methods: [`public void update(${I.MiniInfo} info) {
+                this.location = (info == null) ? ${I.MiniLoc}.UNKNOWN : info.location;
+                this.scale = xaero.common.HudMod.INSTANCE.getMinimap().getMinimapFBORenderer().getZoom();
+            }`]
+        })
+    }
+    static createMinimapProviderClass() {
+        const name = this.MINIMAP.Provider
+        let element = this.className(this.ELEMENT)
+        let context = this.className(this.MINIMAP.Context)
+        const I = this.IMPORT
+        const mcCls = I.Minecraft
+        const mcGet = DeobfRef.methodName(mcCls, 'getInstance', 'method_1551', 'm_91087_')
+        const mcPlayerField = DeobfRef.fieldName(mcCls, 'player', 'field_1724', 'f_91074_')
+        const entityCls = DeobfRef.className(
+            'net.minecraft.world.entity.Entity', 'net.minecraft.class_1297',
+            'net.minecraft.entity.Entity', 'net.minecraft.src.C_507_')
+        const pGetX = DeobfRef.methodName(entityCls, 'getX', 'method_23317', 'm_20185_')
+        const pGetZ = DeobfRef.methodName(entityCls, 'getZ', 'method_23321', 'm_20189_')
+        const MINI_MAX_DIST = 128
+        return this.builder({
+            name: name, extend: I.MiniProvider,
+            fields: [`private ${I.Iterator} iterator = ${I.Collections}.emptyIterator();`],
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public void begin(${I.MiniLoc} location, ${I.Object} ctx) {
+                    ${context} context = (${context}) ctx;
+                    if (location != ${I.MiniLoc}.OVER_MINIMAP) {
+                        this.iterator = ${I.Collections}.emptyIterator();
+                        return;
+                    }
+                    ${I.ArrayList} filtered = new ${I.ArrayList}();
+                    ${mcCls} mc = ${mcCls}.${mcGet}();
+                    if (mc != null && mc.${mcPlayerField} != null) {
+                        double px = mc.${mcPlayerField}.${pGetX}();
+                        double pz = mc.${mcPlayerField}.${pGetZ}();
+                        double maxDistSq = java.lang.Math.pow(${MINI_MAX_DIST} * 1.0, 2.0);
+                        ${I.ArrayList} elements = context.elements;
+                        for (int i = 0; i < elements.size(); i++) {
+                            ${element} el = (${element}) elements.get(i);
+                            if (el == null) continue;
+                            double dx = el.centerX() - px;
+                            double dz = el.centerZ() - pz;
+                            if (dx * dx + dz * dz <= maxDistSq) filtered.add(el);
+                        }
+                    }
+                    this.iterator = filtered.iterator();
+                }`,
+                `public boolean hasNext(${I.MiniLoc} location, ${I.Object} ctx) {
+                    return location == ${I.MiniLoc}.OVER_MINIMAP && this.iterator.hasNext(); }`,
+                `public ${I.Object} getNext(${I.MiniLoc} location, ${I.Object} ctx) {
+                    return this.iterator.hasNext() ? (${element}) this.iterator.next() : null; }`,
+                `public void end(${I.MiniLoc} location, ${I.Object} ctx) {
+                    this.iterator = ${I.Collections}.emptyIterator(); }`,
+            ]
+        })
+    }
+    static createMinimapReaderClass() {
+        const name = this.MINIMAP.Reader
+        const I = this.IMPORT
+        let element = this.className(this.ELEMENT)
+        let context = this.className(this.MINIMAP.Context)
+        return this.builder({
+            name: name, extend: I.MiniReader,
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public boolean isHidden(${I.Object} e, ${I.Object} c) { return e == null; }`,
+                `public double getRenderX(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerX(); }`,
+                `public double getRenderY(${I.Object} e, ${I.Object} c, float p) { return 0.0; }`,
+                `public double getRenderZ(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerZ(); }`,
+                `public int getInteractionBoxLeft(${I.Object} e, ${I.Object} c, float p) {
+                    return (int) (-((${element}) e).radius * ((${context}) c).scale); }`,
+                `public int getInteractionBoxRight(${I.Object} e, ${I.Object} c, float p) {
+                    return (int) (((${element}) e).radius * ((${context}) c).scale); }`,
+                `public int getInteractionBoxTop(${I.Object} e, ${I.Object} c, float p) {
+                    return (int) (-((${element}) e).radius * ((${context}) c).scale); }`,
+                `public int getInteractionBoxBottom(${I.Object} e, ${I.Object} c, float p) {
+                    return (int) (((${element}) e).radius * ((${context}) c).scale); }`,
+                `public int getRenderBoxLeft(${I.Object} e, ${I.Object} c, float p) {
+                    return -((${element}) e).radius; }`,
+                `public int getRenderBoxRight(${I.Object} e, ${I.Object} c, float p) {
+                    return ((${element}) e).radius; }`,
+                `public int getRenderBoxTop(${I.Object} e, ${I.Object} c, float p) {
+                    return -((${element}) e).radius; }`,
+                `public int getRenderBoxBottom(${I.Object} e, ${I.Object} c, float p) {
+                    return ((${element}) e).radius; }`,
+                `public int getLeftSideLength(${I.Object} e, ${I.Minecraft} mc) { return 16; }`,
+                `public ${I.String} getMenuName(${I.Object} e) { return ""; }`,
+                `public ${I.String} getFilterName(${I.Object} e) { return ""; }`,
+                `public int getMenuTextFillLeftPadding(${I.Object} e) { return 0; }`,
+                `public int getRightClickTitleBackgroundColor(${I.Object} e) { return 0; }`,
+                `public boolean shouldScaleBoxWithOptionalScale() { return true; }`,
+                `public float getBoxScale(${I.MiniLoc} loc, ${I.Object} e, ${I.Object} c) {
+                    return (float) ((${context}) c).scale; }`,
+            ]
+        })
+    }
+    static createMinimapRendererClass() {
+        const name = this.MINIMAP.Renderer
+        const I = this.IMPORT
+        let element = this.className(this.ELEMENT)
+        let context = this.className(this.MINIMAP.Context)
+        let reader = this.className(this.MINIMAP.Reader)
+        let provider = this.className(this.MINIMAP.Provider)
+        return this.builder({
+            name: name, extend: I.MiniRenderer,
+            constructors: [`public ${name}(${context} ctx) { super(new ${reader}(), new ${provider}(), ctx); }`],
+            methods: [
+                `public boolean shouldRender(${I.MiniLoc} loc) {
+                    return loc == ${I.MiniLoc}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
+                `public int getOrder() { return 100; }`,
+                `public void preRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {
+                    ((${context}) this.context).update(info); }`,
+                `public void postRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {}`,
+                `public boolean renderElement(
+                        ${I.Object} el, boolean hovered, boolean highlighted, double depth, float screenSizeBasedScale,
+                        double localX, double localY, ${I.MiniInfo} info, ${I.GuiGraphics} graphics, ${I.BufferSource} buf) {
+                    if (el == null || graphics == null || info == null) return false;
+                    if (!((${context}) this.context).enabled) return false;
+                    ${element} e = (${element}) el;
+                    if (e.render == null) return false;
+                    double scale = ((${context}) this.context).scale;
+                    if (!${I.Double}.isFinite(scale) || scale <= 0.0 || scale > 64.0) scale = 1.0;
+                    try {
+                        ${I.Object}[] args = new ${I.Object}[8];
+                        args[0] = graphics;
+                        args[1] = e;
+                        args[2] = ${I.Double}.valueOf(localX);
+                        args[3] = ${I.Double}.valueOf(localY);
+                        args[4] = info;
+                        args[5] = ${I.Double}.valueOf(scale);
+                        args[6] = ${I.Boolean}.valueOf(hovered);
+                        args[7] = ${I.Boolean}.FALSE;
+                        ${I.Object} result = e.render.apply(args);
+                        return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
+                    } catch (${I.Throwable} t) {
+                        return false;
+                    }
+                }`,
+            ]
+        })
+    }
+    static createWorldMapContextClass() {
+        const name = this.WORLDMAP.Context
+        const I = this.IMPORT
+        return this.builder({
+            name: name,
+            fields: [
+                `public ${I.ArrayList} elements = new ${I.ArrayList}();`,
+                `public ${I.MiniLoc} location = ${I.MiniLoc}.UNKNOWN;`,
+                `public double scale = 1.0;`,
+                `public boolean enabled = true;`,
+            ],
+            constructors: [`public ${name}() { super(); }`]
+        })
+    }
+    static createWorldMapProviderClass() {
+        const name = this.WORLDMAP.Provider
+        const I = this.IMPORT
+        let context = this.className(this.WORLDMAP.Context)
+        return this.builder({
+            name: name, extend: I.WorldProvider,
+            fields: [`private ${I.Iterator} iterator = ${I.Collections}.emptyIterator();`],
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public void begin(${I.WorldLoc} location, ${I.Object} ctx) {
+                    this.iterator = new ${I.ArrayList}(((${context}) ctx).elements).iterator(); }`,
+                `public boolean hasNext(${I.WorldLoc} location, ${I.Object} ctx) { return this.iterator.hasNext(); }`,
+                `public ${I.Object} getNext(${I.WorldLoc} location, ${I.Object} ctx) {
+                    return this.iterator.hasNext() ? this.iterator.next() : null; }`,
+                `public void end(${I.WorldLoc} location, ${I.Object} ctx) {
+                    this.iterator = ${I.Collections}.emptyIterator(); }`,
+            ]
+        })
+    }
+    static createWorldMapReaderClass() {
+        const name = this.WORLDMAP.Reader
+        const I = this.IMPORT
+        let element = this.className(this.ELEMENT)
+        let context = this.className(this.WORLDMAP.Context)
+        return this.builder({
+            name: name, extend: I.WorldReader,
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public boolean isHidden(${I.Object} e, ${I.Object} c) { return e == null; }`,
+                `public double getRenderX(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerX(); }`,
+                `public double getRenderZ(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).centerZ(); }`,
+                `public int getInteractionBoxLeft(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
+                `public int getInteractionBoxRight(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
+                `public int getInteractionBoxTop(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
+                `public int getInteractionBoxBottom(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
+                `public int getRenderBoxLeft(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
+                `public int getRenderBoxRight(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
+                `public int getRenderBoxTop(${I.Object} e, ${I.Object} c, float p) { return -((${element}) e).radius; }`,
+                `public int getRenderBoxBottom(${I.Object} e, ${I.Object} c, float p) { return ((${element}) e).radius; }`,
+                `public int getLeftSideLength(${I.Object} e, ${I.Minecraft} mc) { return 16; }`,
+                `public ${I.String} getMenuName(${I.Object} e) { return ""; }`,
+                `public ${I.String} getFilterName(${I.Object} e) { return ""; }`,
+                `public int getMenuTextFillLeftPadding(${I.Object} e) { return 0; }`,
+                `public int getRightClickTitleBackgroundColor(${I.Object} e) { return 0; }`,
+                `public boolean shouldScaleBoxWithOptionalScale() { return false; }`,
+            ]
+        })
+    }
+    static createWorldMapRendererClass() {
+        const name = this.WORLDMAP.Renderer
+        const I = this.IMPORT
+        let element = this.className(this.ELEMENT)
+        let context = this.className(this.WORLDMAP.Context)
+        let reader = this.className(this.WORLDMAP.Reader)
+        let provider = this.className(this.WORLDMAP.Provider)
+        return this.builder({
+            name: name, extend: I.WorldRenderer,
+            constructors: [`public ${name}(${context} ctx, ${provider} provider, ${reader} reader) { super(ctx, provider, reader); }`],
+            methods: [
+                `public boolean shouldRender(${I.WorldLoc} location, boolean shadow) { return true; }`,
+                `public int getOrder() { return 200; }`,
+                `public boolean shouldBeDimScaled() { return false; }`,
+                `public void preRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {}`,
+                `public void postRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {}`,
+                `public void renderElementShadow(${I.Object} e, boolean h, float os, double px, double py,
+                    ${I.WorldInfo} info, ${I.GuiGraphics} g, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp) {}`,
+                `public boolean renderElement(
+                        ${I.Object} element, boolean hovered, double optionalDepth, float optionalScale,
+                        double partialX, double partialY, ${I.WorldInfo} info, ${I.GuiGraphics} graphics,
+                        ${I.BufferSource} bufferSource, ${I.WorldTextureProvider} rendererProvider) {
+                    if (!((${context}) this.context).enabled) return false;
+                    ${element} el = (${element}) element;
+                    if (el == null || el.render == null) return false;
+                    if (info == null || graphics == null) return false;
+                    try {
+                        double sacle = info.scale;
+                        if (!${I.Double}.isFinite(sacle) || sacle <= 0.0 || sacle > ${I.Float}.MAX_VALUE) sacle = 1.0;
+                        ${I.Object}[] args = new ${I.Object}[8];
+                        args[0] = graphics;
+                        args[1] = el;
+                        args[2] = ${I.Double}.valueOf(partialX);
+                        args[3] = ${I.Double}.valueOf(partialY);
+                        args[4] = info;
+                        args[5] = ${I.Double}.valueOf(sacle);
+                        args[6] = ${I.Boolean}.valueOf(hovered);
+                        args[7] = ${I.Boolean}.TRUE;
+                        ${I.Object} result = el.render.apply(args);
+                        return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
+                    } catch (${I.Throwable} t) {
+                        return false;
+                    }
+                }`,
+            ]
+        })
+    }
+}
+/** 渲染层管理器（小地图 + 世界地图） */
+class XaeroOverlayManager {
+    constructor() {
+        /** @type {JavaClass|null} 共用 Element 类 */
+        this.ElementCls = null
+
+        /** @type {boolean} 小地图是否已注册 */
+        this.minimapInited = false
+        /** 小地图OverMapRendererHandler实例
+         * @type {xaero.hud.minimap.element.render.over.MinimapElementOverMapRendererHandler|null} */
+        this.minimapHandler = null
+        /** @type {object|null} 小地图 Renderer 实例 */
+        this.minimapRenderer = null
+        /** @type {object|null} 小地图 Context 实例 */
+        this.minimapContext = null
+
+        /** @type {boolean} 世界地图是否已注册 */
+        this.worldMapInited = false
+        /** 世界地图 MapElementRenderHandler 实例
+         * @type {xaero.map.element.MapElementRenderHandler|null} */
+        this.worldMapHandler = null
+        /** @type {object|null} 世界地图 Renderer 实例 */
+        this.worldMapRenderer = null
+        /** @type {object|null} 世界地图 Context 实例 */
+        this.worldMapContext = null
     }
 
-    /**
-     * @param {GuiMap} map
-     * @param {IDraw2D} overlay
-     * @param {VeinEntry} opts
-     */
-    constructor(map, overlay, opts) {
-        /** @type {GuiMap} 地图 */ this.map = map
-        /** @type {IDraw2D} 地图 */ this.overlay = overlay
-        /** @type {int} 矿脉中心坐标 */ this.x = opts.x
-        /** @type {int} 矿脉中心坐标 */ this.z = opts.z
-        /** @type {int} 矿脉半径 */ this.radius = opts.radius
-        /** @type {string} 矿脉名称 */ this.mineral = opts.mineral
-        /** @type {int} 已开采量 */ this.depletion = opts.depletion
-        /** @type {string} 主产物id */ this.icon = IeMineral.MINERAL_MAP[this.mineral].texture?.icon
-            ?? IeMineral.MINERAL_MAP.none.texture.icon
-        /** @type {number} 控件配色 */ this.color = IeMineral.MINERAL_MAP[this.mineral].texture?.color
-            ?? IeMineral.MINERAL_MAP.none.texture.color
-        /** @type {CustomImage} 控件配色 */ this.circle = IeMineral.MINERAL_MAP[this.mineral].texture?.circle
-            ?? IeMineral.MINERAL_MAP.none.texture.circle
+    /** 注册小地图渲染层 */
+    registerMinimap() {
+        if (this.minimapInited) return this
+        this.minimapHandler = Java.type(ModBuilder.IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
 
-        /** @type {boolean} @private 是否可见 */ this._visiable = false
+        const contextCls = ModBuilder.createMinimapContextClass()
+        ModBuilder.createMinimapProviderClass()
+        ModBuilder.createMinimapReaderClass()
+        const rendererCls = ModBuilder.createMinimapRendererClass()
 
-        /** @type {{center:Item,range:Image}} 控件 */
-        this.widgets = {}
-        this.create()
-    }
+        this.minimapContext = Reflection.newInstance(contextCls)
+        this.minimapRenderer = Reflection.newInstance(rendererCls, this.minimapContext)
+        this.minimapHandler.add(this.minimapRenderer)
 
-    /** @returns {boolean} */
-    get visiable() { return this._visiable }
-    /** @param {boolean} value */
-    set visiable(value) {
-        if (value == this._visiable) return
-        for (let key of Object.keys(this.widgets)) {
-            if (value)
-                this.overlay.reAddElement(this.widgets[key])
-            else
-                this.overlay.removeElement(this.widgets[key])
-        }
-        this._visiable = value
-    }
-
-    /** @returns {string[]} 提示框内容 */
-    get details() {
-        let mineral = IeMineral.MINERAL_MAP[this.mineral]
-        if (!mineral) return [`未知矿脉: ${this.mineral}`]
-        let register = Client.getRegistryManager()
-        let handle = v => `${register.getItem(v.stack).getName()}(${Math.round(v.chance * 100)}%)`
-        return [
-            `矿脉: ${mineral.transName}`,
-            `中心: ${this.x}, ${this.z}`,
-            `半径: ${this.radius}`,
-            `储量: ${IeMineral.MAX - this.depletion} (${Math.round((1 - this.depletion / IeMineral.MAX) * 100)}%)`,
-            `矿物: ${mineral.outputs.map(handle)}`,
-            `废渣: ${mineral.spoils.map(handle)}`,
-        ]
-    }
-
-    /** 创建绘制元素 */
-    create() {
-        this.widgets.center = this.overlay.itemBuilder().zIndex(0)
-            .item(Client.getRegistryManager().getItemStack(this.icon, '{Enchantments:[{id:-1,lvl:-1}]}'))
-            .build()
-        this.widgets.range = this.overlay.imageBuilder().zIndex(0)
-            .fromCustomImage(this.circle).alpha(150)
-            .build()
+        this.minimapInited = true
+        mclog('小地图渲染层已注册')
         return this
     }
 
-    /** 每帧更新坐标 */
-    update() {
-        let x = this.map.toX(this.x - 1)
-        let y = this.map.toY(this.z - 1)
-        this.visiable = this.map.isInBounds(x, y)
-        if (this._visiable) {
-            let size = Math.max(9, this.map.scale()) / 16
-            this.widgets.center.moveTo(x, y).setScale(size)
-            let radius = this.map.toLength(2 * this.radius)
-            this.widgets.range.setSize(radius, radius)
-                .align(this.widgets.center, 'CenterOnCenter', 'CenterOnCenter')
+    /** 注册世界地图渲染层 */
+    registerWorldMap() {
+        if (this.worldMapInited) return this
+        this.worldMapHandler = Java.type(ModBuilder.IMPORT.WorldMap).mapElementRenderHandler
+
+        const contextCls = ModBuilder.createWorldMapContextClass()
+        const providerCls = ModBuilder.createWorldMapProviderClass()
+        const readerCls = ModBuilder.createWorldMapReaderClass()
+        const rendererCls = ModBuilder.createWorldMapRendererClass()
+
+        this.worldMapContext = Reflection.newInstance(contextCls)
+        const provider = Reflection.newInstance(providerCls)
+        const reader = Reflection.newInstance(readerCls)
+        this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext, provider, reader)
+
+        this.worldMapHandler.add(this.worldMapRenderer)
+        this.worldMapInited = true
+        mclog('世界地图渲染层已注册')
+        return this
+    }
+
+    /** 注册所有渲染层 */
+    register() {
+        this.ElementCls = ModBuilder.createElementClass()
+        this.registerMinimap()
+        this.registerWorldMap()
+        return this
+    }
+
+    /** 从渲染管线移除 */
+    unregister() {
+        if (this.minimapInited) {
+            try {
+                const cls = Reflection.getClass(ModBuilder.IMPORT.MiniRendererHandler)
+                const f = Reflection.getDeclaredField(cls, 'renderers')
+                f.setAccessible(true)
+                f.get(this.minimapHandler).remove(this.minimapRenderer)
+            } catch (e) { mclog(`小地图卸载异常: ${e}`, 0xc) }
+            this.minimapInited = false
+            this.minimapRenderer = null
+            this.minimapContext = null
         }
+
+        if (this.worldMapInited) {
+            try {
+                const f = this.worldMapHandler.getClass().getDeclaredField('renderers')
+                f.setAccessible(true)
+                if (f != null) f.get(this.worldMapHandler).remove(this.worldMapRenderer)
+            } catch (e) { mclog(`世界地图卸载异常: ${e}`, 0xc) }
+            this.worldMapInited = false
+            this.worldMapRenderer = null
+            this.worldMapContext = null
+        }
+
+        mclog('渲染层已卸载')
+        return true
     }
 
-    /** 移除 */
-    remove() {
-        this.visiable = false
-        this.widgets = {}
+    /**
+     * 添加一个矿脉元素
+     * @param {number} cx 区块 X
+     * @param {number} cz 区块 Z
+     * @param {number} color ARGB 颜色
+     * @param {number} size 尺寸（方块单位，直径）
+     * @param {Function} render 元素渲染回调
+     * @param {{radius:number, depletion:number, mineral:string, icon:string}} [extra=null] 矿脉附加数据
+     * @returns {object[]} [小地图元素, 世界地图元素]（可能为 null）
+     */
+    addElement(cx, cz, color = 0x80FF0000, size = 16, render = null, extra = null) {
+        if (!this.minimapInited && !this.worldMapInited) throw new Error('XaeroOverlayManager 未 register')
+        const out = []
+        const mk = () => {
+            const el = Reflection.newInstance(this.ElementCls, cx | 0, cz | 0, color | 0, size | 0, render)
+            if (extra) {
+                el.radius = extra.radius | 0
+                el.depletion = extra.depletion | 0
+                el.mineral = extra.mineral ?? ""
+                el.icon = extra.icon ?? "minecraft:stone"
+            }
+            return el
+        }
+        if (this.minimapInited) {
+            const el = mk()
+            this.minimapContext.elements.add(el)
+            out.push(el)
+        }
+        if (this.worldMapInited) {
+            const el = mk()
+            this.worldMapContext.elements.add(el)
+            out.push(el)
+        }
+        return out
     }
 
-    /** @returns {boolean} 鼠标是否悬停在矿脉上 */
-    focus() {
-        if (!this._visiable) return false
-        let i = this.widgets.center
-        let dx = Hud.getMouseX() - i.getX()
-        let dy = Hud.getMouseY() - i.getY()
-        return dx > 0 && dy > 0 && dx < 8 && dy < 8
+    /**
+     * 移除一个或多个元素
+     * @param {object|object[]|null} handle addElement 的返回值
+     * @returns {boolean} 是否移除成功
+     */
+    removeElement(handle) {
+        if (!handle) return false
+        const arr = Array.isArray(handle) ? handle : [handle]
+        let removed = false
+        for (const h of arr) {
+            if (!h) continue
+            if (this.minimapInited) removed = this.minimapContext.elements.remove(h) || removed
+            if (this.worldMapInited) removed = this.worldMapContext.elements.remove(h) || removed
+        }
+        return removed
+    }
+
+    /** 清空所有元素 */
+    clearElements() {
+        if (this.minimapInited) this.minimapContext.elements.clear()
+        if (this.worldMapInited) this.worldMapContext.elements.clear()
+    }
+
+    /** 小地图元素数量 @returns {number} */
+    get minimapSize() { return this.minimapInited ? this.minimapContext.elements.size() : 0 }
+
+    /** 世界地图元素数量 @returns {number} */
+    get worldMapSize() { return this.worldMapInited ? this.worldMapContext.elements.size() : 0 }
+
+    setEnabled(v) {
+        if (this.minimapInited) this.minimapContext.enabled = !!v
+        if (this.worldMapInited) this.worldMapContext.enabled = !!v
+    }
+    isEnabled() {
+        return (this.minimapInited && this.minimapContext.enabled)
+            || (this.worldMapInited && this.worldMapContext.enabled)
+    }
+    toggle() {
+        const now = !this.isEnabled()
+        this.setEnabled(now)
+        return now
+    }
+
+    /**
+     * 判断鼠标是否悬停在矿脉上
+     * @param {number} x 矿脉屏幕 X
+     * @param {number} y 矿脉屏幕 Y
+     * @param {number} radius 矿脉半径（方块）
+     * @param {number} scale 缩放
+     * @returns {boolean}
+     */
+    static isHovered = (x, y, radius, scale) => {
+        let screen = Hud.getOpenScreen()
+        let ref = Reflection.getReflect(screen)
+        let scale_base = Hud.getScaleFactor()
+        let width = Hud.getWindowWidth() / scale_base
+        let height = Hud.getWindowHeight() / scale_base
+
+        let cameraX = ref.get('cameraX')
+        let cameraZ = ref.get('cameraZ')
+        let scale_total = ref.get('scale') / scale_base
+
+        let ox = width / 2 + (x - cameraX) * scale_total
+        let oz = height / 2 + (y - cameraZ) * scale_total
+        const r = Math.min(Math.max(10, radius * scale_total), 20)
+        let dx = Hud.getMouseX() - ox
+        let dy = Hud.getMouseY() - oz
+        return dx * dx + dy * dy <= r * r
     }
 }
 
 /** 事件 */
 class Event {
-    /** @type {net.minecraft.client.input.KeyEvent} */
-    static KeyEvent = DeobfRef.Type(
-        'net.minecraft.client.input.KeyEvent', 'net.minecraft.class_11908',
-        'net.minecraft.client.input.KeyInput', 'net.minecraft.src.C_411099_'
-    )
-    /** @type {net.minecraft.client.input.CharacterEvent} */
-    static CharacterEvent = DeobfRef.Type(
-        'net.minecraft.client.input.CharacterEvent', 'net.minecraft.class_11905',
-        'net.minecraft.client.input.CharInput', 'net.minecraft.src.C_411367_'
-    )
-    /** @type {net.minecraft.client.input.MouseButtonEvent} */
-    static MouseButtonEvent = DeobfRef.Type(
-        'net.minecraft.client.input.MouseButtonEvent', 'net.minecraft.class_11909',
-        'net.minecraft.client.gui.Click', 'net.minecraft.src.C_410856_'
-    )
-    /** @type {net.minecraft.client.input.MouseButtonInfo} */
-    static MouseButtonInfo = DeobfRef.Type(
-        'net.minecraft.client.input.MouseButtonInfo', 'net.minecraft.class_11910',
-        'net.minecraft.client.input.MouseInput', 'net.minecraft.src.C_411057_'
-    )
-
     /** @constant @type {number} 判定属于拖拽的鼠标最短拖拽距离 */
     static DRAG_LIMIT = 1
-    /** @constant @type {number} 判定属于拖拽的鼠标最短拖拽距离 */
+    /** @constant @type {number} 判定双击的最长间隔(ms) */
     static DBCLICK_INTERVAL = 300
     /** @constant @type {Key} 左键 */
     static LEFTCLICK = 'key.mouse.left'
@@ -769,13 +860,12 @@ class Event {
     /** 停止事件 */
     stopPropagation() { this.consumed = true }
 }
-
 /** 事件池 */
 class EventBus {
     constructor() {
         /** @type {any|null} JsMacros Tick 监听 id */
         this.tick = null
-        /** @type {Record<string, {handle:handle_eventCallback, clickTimer?:number}>} tick事件池 */
+        /** @type {Record<string, {handle:(event:Event)=>{}, clickTimer?:number}>} tick事件池 */
         this.events = {}
     }
     /** 生成事件监听ID @returns {string} */
@@ -804,13 +894,10 @@ class EventBus {
                 }
             }
         }))
-        let dragging = false
-        let latest = 0
-        let dbclick = false
     }
     /**
      * 注册持续监听器（每 tick 触发）
-     * @param {handle_eventCallback} handle 回调
+     * @param {(event:Event)=>{}} handle 回调
      * @returns {string} 监听ID
      */
     addListener(handle) {
@@ -820,7 +907,7 @@ class EventBus {
     }
     /**
      * 注册一次性定时回调（到点触发后自动移除）
-     * @param {handle_eventCallback} handle 回调
+     * @param {(event:Event)=>{}} handle 回调
      * @param {number} delay 延迟毫秒
      * @returns {string} 监听ID
      */
@@ -842,8 +929,112 @@ class EventBus {
         this.events = {}
     }
 }
+/** Draw2D 拓展：支持裁剪画布 + 渲染提示框 */
+class Draw2DUtils {
+    /** @typedef {{x:int,y:int,width:int,height:int}} Region 显示区域 */
+    /** @type {TextRenderer} */
+    static TextRenderer = new DeobfRef(Client.getMinecraft())
+        .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
+    /** @type {JavaClass<Draw2D>} */
+    static Draw2D = Reflection.getClass(
+        'xyz.wagyourtail.jsmacros.client.api.classes.render.Draw2D',
+        'com.jsmacrosce.jsmacros.client.api.classes.render.Draw2D')
+    /** @type {DeobfRef<DrawContext>} */
+    static DrawContext = DeobfRef.Class(
+        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
+        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
 
-/** 多选框 */
+    /**
+     * 创建限制显示范围画布
+     * @param {Region} region 显示区域
+     * @param {(drawContext:DrawContext) => void} [onrender] 每帧渲染回调
+     * @returns {Draw2D} 裁剪后的 Draw2D
+     */
+    static createDraw2D(region, onrender) {
+        let builder = Reflection.createClassProxyBuilder(Draw2DUtils.Draw2D)
+        let on = Draw2DUtils.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
+        let off = Draw2DUtils.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
+        if (on && off) {
+            builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
+                let dcref = new DeobfRef(args[0])
+                dcref.call(['flush', 'method_51452', 'draw', 'm_280262_'])
+                let { x, y, width, height } = region
+                dcref.invoke(on, x | 0, y | 0, (x + width) | 0, (y + height) | 0)
+                let result = proxyRef.parent(args)
+                dcref.invoke(off)
+                onrender && onrender(...args)
+                return result
+            }))
+            let proxy = builder.buildInstance([])
+            proxy.widthSupplier = () => region.width
+            proxy.heightSupplier = () => region.height
+            return proxy
+        }
+        return Hud.createDraw2D()
+    }
+    /**
+     * 绘制气泡提示框
+     * @param {DrawContext} drawContext 画板
+     * @param {int} x 坐标
+     * @param {int} y 坐标
+     * @param {JavaArray<Component>} components 格式化文本列表
+     */
+    static renderToolTip(drawContext, x, y, components) {
+        if (drawContext) {
+            let method = [
+                'setComponentTooltipForNextFrame', 'renderComponentTooltip',
+                'method_51434', 'drawTooltip', 'm_403688_', 'm_280666_'
+            ]
+            let dcref = new DeobfRef(drawContext)
+            try {
+                dcref.call(method, this.TextRenderer, components, Math.round(x), Math.round(y))
+                dcref.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
+            } catch {
+                dcref.call(method, this.TextRenderer, components, Math.round(x), Math.round(y),
+                    Player.getPlayer().getMainHand().getRaw())
+            }
+        }
+    }
+
+    /**
+     * @param {Region} region 区域
+     * @param {(self:Draw2DUtils,drawContext:DrawContext) => void} [onrender] 渲染事件
+     */
+    constructor(region, onrender) {
+        /** @type {Region} 区域 */
+        this.region = region
+        /** @type {(self:Draw2DUtils,drawContext:DrawContext) => void} 渲染事件 */
+        this.onrender = onrender
+        /** @type {Draw2D} */
+        this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
+        /** @type {string[]} 提示框内容 */
+        this.tooltips = []
+        /** @type {null|((self:Draw2DUtils) => string[])} */
+        this.dynamicTooltips = null
+    }
+    /** @returns {JavaArray<Component>} 气泡提示框内容组件 */
+    getToolTipComponents() {
+        let arr = JavaUtils.createArrayList()
+        for (let v of this.tooltips)
+            arr.add(Chat.createTextHelperFromString(v).getRaw())
+        return arr
+    }
+    /** @param {DrawContext} drawContext */
+    render(drawContext) {
+        this.onrender && this.onrender(this, drawContext)
+        if (this.dynamicTooltips)
+            this.tooltips = this.dynamicTooltips(this)
+        if (this.tooltips.length > 0) {
+            let components = this.getToolTipComponents()
+            Draw2DUtils.renderToolTip(drawContext, Hud.getMouseX(), Hud.getMouseY(), components)
+        }
+    }
+    /** @param {string[]|(self:Draw2DUtils) => string[]} v */
+    setTooltip(v) { typeof v == 'function' ? this.dynamicTooltips = v : this.tooltips = v }
+    /** 清除提示框 */
+    removeTooltip() { this.tooltips = []; this.dynamicTooltips = null }
+}
+/** 多选框（过滤面板） */
 class MultiSelect {
     /**
      * @param {object} opts
@@ -857,7 +1048,7 @@ class MultiSelect {
      * @param {number} [opts.scale=0.8] 文字缩放
      * @param {number} [opts.color=0xFFFFFF] 文字颜色
      * @param {number} [opts.boxColor=0xAAAAAA] 复选框底色
-     * @param {number} [opts.checkColor=0x55FF55] 勾选色
+     * @param {number} [opts.checkColor=0x55FF55] 勾选色（无对应配色时的回退）
      * @param {number} [opts.buttonHeight=12] 按钮高度
      * @param {number} [opts.buttonGap=4] 按钮间距
      * @param {number} [opts.buttonPadding=4] 按钮左右内边距
@@ -868,6 +1059,7 @@ class MultiSelect {
      * @param {number} [opts.panelPadding=6] 面板内边距
      * @param {number} [opts.screenOffsetX=0] D2D 区域屏幕 X 偏移
      * @param {number} [opts.screenOffsetY=0] D2D 区域屏幕 Y 偏移
+     * @param {Record<string, number>} [opts.colors] 勾选填充色 key → 0xRRGGBB
      */
     constructor(opts = {}) {
         this.selected = Object.assign({}, opts.selected || {})
@@ -898,6 +1090,9 @@ class MultiSelect {
         this.screenOffsetX = opts.screenOffsetX ?? 0
         this.screenOffsetY = opts.screenOffsetY ?? 0
 
+        /** @type {Record<string, number>} key → 0xRRGGBB 颜色 */
+        this.colors = Object.assign({}, opts.colors || {})
+
         this.onChange = opts.onChange || null
         this.overlay = null
         this.panel = null
@@ -907,23 +1102,28 @@ class MultiSelect {
         this._contentY = this.y
         this._totalWidth = 0
     }
-
-    /**
-     * @param {string} key
-     * @param {string} label
-     * @returns {this}
-     */
-    setLabel(key, label) { this.labels[key] = label; if (this.rendered) this._syncTexts(); return this }
-
     /**
      * @param {Record<string, string>} map
      * @returns {this}
      */
-    setLabels(map) { for (const k of Object.keys(map)) this.labels[k] = map[k]; if (this.rendered) this._syncTexts(); return this }
-
+    setLabels(map) {
+        for (const k of Object.keys(map))
+            this.labels[k] = map[k]
+        if (this.rendered) this._syncTexts()
+        return this
+    }
+    /**
+     * 批量设置勾选填充色
+     * @param {Record<string, number>} map key → 0xRRGGBB
+     * @returns {this}
+     */
+    setColors(map) {
+        for (const k of Object.keys(map)) this.colors[k] = map[k]
+        if (this.rendered) this._syncCheck()
+        return this
+    }
     /** @param {string} key @returns {boolean} */
     isSelected(key) { return !!this.selected[key] }
-
     /**
      * @param {string} key
      * @param {boolean} value
@@ -952,21 +1152,9 @@ class MultiSelect {
     getSelectedKeys() { return Object.keys(this.selected).filter(k => this.selected[k]) }
 
     /** @returns {this} */
-    selectAll() {
+    toggleAll(v) {
         for (const k of this.keys) {
-            if (!this.selected[k]) {
-                this.selected[k] = true
-                if (this.onChange) this.onChange(k, true)
-            }
-        }
-        if (this.rendered) this._syncCheck()
-        return this
-    }
-
-    /** @returns {this} */
-    invertAll() {
-        for (const k of this.keys) {
-            this.selected[k] = !this.selected[k]
+            this.selected[k] = v ?? !this.selected[k]
             if (this.onChange) this.onChange(k, this.selected[k])
         }
         if (this.rendered) this._syncCheck()
@@ -979,12 +1167,11 @@ class MultiSelect {
      */
     render(overlay) {
         this.overlay = overlay
-
         const buttonDefs = [
             { action: 'all', label: '全选' },
             { action: 'invert', label: '反选' },
+            { action: 'clear', label: '取消' },
         ]
-
         // 按钮宽度
         let bx = this.x
         const buttonWidths = []
@@ -997,7 +1184,6 @@ class MultiSelect {
             bx += w + this.buttonGap
         }
         const buttonRowWidth = bx - this.x - this.buttonGap
-
         // 选项行最大宽度
         let maxRowWidth = 0
         for (const key of this.keys) {
@@ -1006,7 +1192,6 @@ class MultiSelect {
             maxRowWidth = Math.max(maxRowWidth, this.boxSize + this.gap + t.getWidth())
             overlay.removeElement(t)
         }
-
         const contentWidth = Math.max(buttonRowWidth, maxRowWidth)
         const buttonRowHeight = this.buttonHeight + 6
         this._contentY = this.y + buttonRowHeight
@@ -1014,14 +1199,12 @@ class MultiSelect {
         const totalWidth = contentWidth + this.panelPadding * 2
         const totalHeight = buttonRowHeight + this.keys.length * this.rowHeight + this.panelPadding * 2
         this._totalWidth = totalWidth
-
         // 面板
         this.panel = overlay.rectBuilder()
             .color(this.panelColor).alpha(this.panelAlpha)
             .size(totalWidth, totalHeight)
             .buildAndAdd()
         this.panel.moveTo(this.x - this.panelPadding, this.y - this.panelPadding)
-
         // 按钮行
         bx = this.x
         for (let i = 0; i < buttonDefs.length; i++) {
@@ -1041,7 +1224,6 @@ class MultiSelect {
             this.buttons.push({ bg, text, action: def.action, x1: bx, x2: bx + w })
             bx += w + this.buttonGap
         }
-
         // 选项行
         for (let i = 0; i < this.keys.length; i++) {
             const key = this.keys[i]
@@ -1052,8 +1234,10 @@ class MultiSelect {
                 .size(this.boxSize, this.boxSize).buildAndAdd()
             box.moveTo(this.x, ry)
 
+            // 勾选填充：颜色取对应矿脉配色，无则回退 checkColor
+            const fillColor = this.colors[key] ?? this.checkColor
             const check = overlay.rectBuilder()
-                .color(this.checkColor).alpha(this.selected[key] ? 255 : 0)
+                .color(fillColor).alpha(this.selected[key] ? 255 : 0)
                 .size(this.boxSize - 2, this.boxSize - 2).buildAndAdd()
             check.moveTo(this.x + 1, ry + 1)
 
@@ -1068,7 +1252,6 @@ class MultiSelect {
         this.rendered = true
         return this
     }
-
     /** 移除所有元素 */
     remove() {
         if (!this.overlay) return
@@ -1087,7 +1270,6 @@ class MultiSelect {
         this.buttons = []
         this.rendered = false
     }
-
     /** @param {Event} event */
     tick(event) {
         if (!this.rendered) return
@@ -1095,17 +1277,16 @@ class MultiSelect {
 
         const mx = Hud.getMouseX() - this.screenOffsetX
         const my = Hud.getMouseY() - this.screenOffsetY
-
         // 按钮
         for (const b of this.buttons) {
             if (mx >= b.x1 && mx <= b.x2 &&
                 my >= this.y && my <= this.y + this.buttonHeight) {
-                if (b.action === 'all') this.selectAll()
-                else if (b.action === 'invert') this.invertAll()
+                if (b.action === 'all') this.toggleAll(true)
+                else if (b.action === 'invert') this.toggleAll()
+                else if (b.action === 'clear') this.toggleAll(false)
                 return
             }
         }
-
         // 复选框
         for (let i = 0; i < this.keys.length; i++) {
             const ry = this._contentY + i * this.rowHeight
@@ -1116,15 +1297,15 @@ class MultiSelect {
             }
         }
     }
-
-    /** 同步复选框显示 */
+    /** 同步复选框显示（含填充色） */
     _syncCheck() {
         for (let i = 0; i < this.keys.length; i++) {
-            const on = !!this.selected[this.keys[i]]
-            this.rows[i].check.setAlpha(on ? 255 : 0)
+            const key = this.keys[i]
+            const check = this.rows[i].check
+            check.setColor(this.colors[key] ?? this.checkColor)
+            check.setAlpha(this.selected[key] ? 255 : 0)
         }
     }
-
     /** 同步文字 */
     _syncTexts() {
         for (let i = 0; i < this.keys.length; i++) {
@@ -1134,182 +1315,412 @@ class MultiSelect {
     }
 }
 
-/** 网格边长（方块）—— 与 MC 区块对齐 */
-const CHUNK_SIZE = 16
-/** 以相机中心为圆心的最大可见区块半径（缩小时可见范围不会爆炸） */
-const MAX_CHUNK_RADIUS = 40
-/** 单帧最多处理的矿脉数（超出则按距离裁剪） */
-const MAX_VEINS_PER_FRAME = 1000
+/** 矿脉标记 */
+class IeMineral {
+    /**
+     * @typedef {Object} VeinEntry
+     * @property {number} x 中心方块 X
+     * @property {number} z 中心方块 Z
+     * @property {number} radius 半径（方块）
+     * @property {string} mineral 矿物名（plainName）
+     * @property {number} depletion 已开采量
+     *
+     * @typedef {Object} MineralInfo
+     * @property {string} key 翻译键
+     * @property {string} name plainName
+     * @property {string} transName 本地化名称
+     * @property {string} background 背景方块 id
+     * @property {string[]} dimensions 出现的维度
+     * @property {number} weight 权重
+     * @property {number} failChance 失败率
+     * @property {{stack:string, chance:number}[]} outputs 产出列表
+     * @property {{stack:string, chance:number}[]} spoils 废料列表
+     */
 
-function main() {
-    screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
-        const screen = Hud.getOpenScreen()
-        bus.remove(filter_listener)
-        if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
-            let veins, total, recipes
-            try {
-                const data = readVeins()
-                veins = data.veins
-                total = data.total
-                recipes = data.map
-            } catch (e) {
-                mclog(`读取矿脉失败: ${e}`, 0xc)
-                return
-            }
-            if (!veins || total === 0) {
-                mclog('当前世界没有矿脉数据', 0xe)
-                return
-            }
+    /** @type {JavaClass<ExcavatorHandler>} */
+    static ExcavatorHandler = Java.type('blusunrize.immersiveengineering.api.excavator.ExcavatorHandler')
+    /** @type {JavaClass<MineralMix>} */
+    static MineralMix = Java.type('blusunrize.immersiveengineering.api.excavator.MineralMix')
 
-            const mineralMap = readMineralMap(recipes)
-            IeMineral.init(mineralMap, ExcavatorHandler.mineralVeinYield)
-
-            const guimap = new GuiMap(screen)
-            const region = { x: 0, y: 0, width: 0, height: 0 }
-            Client.runOnMainThread(JavaWrapper.methodToJava(() => {
-                region.width = guimap.width
-                region.height = guimap.height
-            }), true, 1000)
-            const d2d = Hud.createDraw2D()
-            screen.addDraw2D(d2d, region.x, region.y, region.width, region.height)
-            const dim = World.getDimension()
-            /** @type {IeMineral[]} */
-            const veinList = veins[dim] || []
-
-            /** @type {Record<string, IeMineral[]>} */
-            const veinMaps = {}
-            /** @type {Record<string, IeMineral[]>} 区块坐标 "cx cz" → 矿脉列表 */
-            const chunkGrid = {}
-
-            veinList.map(v => {
-                let k = v.mineral
-                let c = new IeMineral(guimap, d2d, v)
-                if (veinMaps[k])
-                    veinMaps[k].push(c)
-                else
-                    veinMaps[k] = [c]
-
-                const cx = Math.floor(v.x / CHUNK_SIZE)
-                const cz = Math.floor(v.z / CHUNK_SIZE)
-                const ck = `${cx} ${cz}`
-                if (!chunkGrid[ck]) chunkGrid[ck] = []
-                chunkGrid[ck].push(c)
-            })
-
-            const initialSelected = {}
-            const labels = {}
-            for (let k of Object.keys(veinMaps)) {
-                if (veinMaps[k].length > 0) {
-                    initialSelected[k] = IeMineral.MINERAL_MAP[k].visiable
-                    labels[k] = `${(IeMineral.MINERAL_MAP[k].transName ?? k).replace(/^.+\./, '')} (${veinMaps[k].length})`
-                }
-            }
-
-            const filterRegion = {
-                x: 25, y: 10,
-                width: 200,
-                height: Math.min(300, guimap.height - 20)
-            }
-            const filter_d2d = new Draw2DUtils(filterRegion)
-            screen.addDraw2D(filter_d2d.target, filterRegion.x, filterRegion.y, filterRegion.width, filterRegion.height)
-
-            const filter = new MultiSelect({
-                selected: initialSelected,
-                x: 4, y: 4, rowHeight: 12, boxSize: 8,
-                gap: 4, scale: 0.8,
-                color: 0xFFFFFF, boxColor: 0xAAAAAA, checkColor: 0x55FF55, panelAlpha: 200,
-                screenOffsetX: filterRegion.x,
-                screenOffsetY: filterRegion.y,
-                onChange: (key, selected) => {
-                    IeMineral.MINERAL_MAP[key].visiable = selected
-                    if (!selected)
-                        for (let m of veinMaps[key])
-                            m.visiable = false
-                }
-            })
-            filter.setLabels(labels)
-            filter.render(filter_d2d.target)
-            bus.remove(filter_listener)
-
-            let lastVisible = new Set()
-
-            filter_listener = bus.addListener(event => {
-                filter.tick(event)
-                filter_d2d.tooltips = []
-
-                const scale = guimap.scale()
-                const halfW = guimap.width / 2 / scale
-                const halfH = guimap.height / 2 / scale
-                const camX = guimap.cameraX
-                const camZ = guimap.cameraZ
-
-                // 1. 按可见范围算区块半径，但不超过 MAX_CHUNK_RADIUS
-                const radiusX = Math.min(MAX_CHUNK_RADIUS, Math.ceil(halfW / CHUNK_SIZE) + 1)
-                const radiusZ = Math.min(MAX_CHUNK_RADIUS, Math.ceil(halfH / CHUNK_SIZE) + 1)
-                const cxCenter = Math.floor(camX / CHUNK_SIZE)
-                const czCenter = Math.floor(camZ / CHUNK_SIZE)
-                const cx0 = cxCenter - radiusX
-                const cx1 = cxCenter + radiusX
-                const cz0 = czCenter - radiusZ
-                const cz1 = czCenter + radiusZ
-
-                // 2. 收集可见候选
-                const candidates = []
-                for (let cx = cx0; cx <= cx1; cx++) {
-                    for (let cz = cz0; cz <= cz1; cz++) {
-                        const bucket = chunkGrid[`${cx} ${cz}`]
-                        if (!bucket) continue
-                        for (const m of bucket) {
-                            if (!IeMineral.MINERAL_MAP[m.mineral].visiable) continue
-                            candidates.push(m)
-                        }
-                    }
-                }
-
-                // 3. 超过上限则按距离相机远近裁剪
-                let shown
-                if (candidates.length > MAX_VEINS_PER_FRAME) {
-                    candidates.sort((a, b) => {
-                        const da = (a.x - camX) ** 2 + (a.z - camZ) ** 2
-                        const db = (b.x - camX) ** 2 + (b.z - camZ) ** 2
-                        return da - db
-                    })
-                    shown = candidates.slice(0, MAX_VEINS_PER_FRAME)
-                    filter_d2d.tooltips.push(`§c显示 ${MAX_VEINS_PER_FRAME}/${candidates.length}（按距离裁剪）`)
-                } else {
-                    shown = candidates
-                }
-
-                // 4. 更新显示
-                const nowVisible = new Set()
-                for (const m of shown) {
-                    m.update()
-                    if (m.focus()) filter_d2d.tooltips = m.details
-                    nowVisible.add(m)
-                }
-
-                // 5. 隐藏切出的
-                for (const m of lastVisible) {
-                    if (!nowVisible.has(m)) m.visiable = false
-                }
-                lastVisible = nowVisible
-            })
+    /** @type {Object<string, MineralInfo & {texture:{icon:string,color:number,circle:CustomImage}, visiable:boolean}>} */
+    static MINERAL_MAP = {
+        none: {
+            texture: {
+                icon: 'minecraft:stone',
+                color: 0xFFFFFF,
+                circle: Hud.createTexture(64, 64, 'ie_mineral_canvas_none').update()
+            },
+            visiable: false
         }
-    }))
-}
+    }
+    /** @type {number} 单矿脉最大储量 */
+    static MAX = this.ExcavatorHandler.mineralVeinYield
 
-const bus = new EventBus()
-/** @type {string|null} filter_listener 监听 id */
-let filter_listener = null
-if (isToggle()) {
-    bus.start()
-    main()
-    while (isToggle()) {
-        Client.waitTick(5)
+    /** HSV→RGB 单行版：h 色相(0-360)，s 饱和度(0-1)，v 明度(0-1)，返回 0xRRGGBB */
+    static randomColor(h, s, v) {
+        const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c
+        const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+            : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
+        return (Math.round((r + m) * 255) << 16) | (Math.round((g + m) * 255) << 8) | Math.round((b + m) * 255)
+    }
+
+    /** 获取矿脉数据 @returns {List<RecipeHolder<R>>} */
+    static recipes() { return this.MineralMix?.RECIPES?.getRecipes(clientLevel()) }
+    /**
+     * 把配方列表转成 {plainName: {...}} 映射
+     * @param {List<RecipeHolder<R>>} recipes
+     * @returns {Record<string, MineralInfo>}
+     */
+    static recipeMap() {
+        const mineral_map = {}
+        this.recipes().forEach(v => {
+            let name = v.getPlainName()
+            let key = v.getTranslationKey()
+            mineral_map[name] = {
+                key: key,
+                name: name,
+                transName: Chat.createTextHelperFromTranslationKey(key).getString().trim(),
+                background: `${JavaUtils.getHelperFromRaw(v.background).getId()}`,
+                dimensions: Array.from(v.dimensions).map(d =>
+                    `${new DeobfRef(d).get('location', 'field_25138', 'value', 'f_135777_')}`),
+                weight: v.weight,
+                failChance: v.failChance,
+                outputs: Array.from(v.outputs).map(o => ({
+                    stack: JavaUtils.getHelperFromRaw(o.stack().get()).getItemId(),
+                    chance: o.chance()
+                })),
+                spoils: Array.from(v.spoils).map(s => ({
+                    stack: JavaUtils.getHelperFromRaw(s.stack().get()).getItemId(),
+                    chance: s.chance()
+                })),
+            }
+        })
+        return mineral_map
+    }
+
+    /** 初始化矿物配方与纹理 */
+    static init() {
+        Object.entries(this.recipeMap()).forEach(([key, info], i) => {
+            let texture = this.MINERAL_MAP[key]?.texture
+            if (!texture) {
+                let color = this.randomColor((i * 137.508) % 360, 0.75, 0.95)
+                let radius = 512
+                let d = 8
+                texture = {
+                    icon: info.outputs.sort((a, b) => b.chance - a.chance)[0].stack,
+                    color: color,
+                    circle: Hud.createTexture(radius, radius, `ie_mineral_canvas_${key}`)
+                        .setGraphicsColor(color)
+                        .fillOval(0, 0, radius - 1, radius - 1)
+                        .setGraphicsColor(0x121212)
+                        .fillOval(d, d, radius - 1 - d * 2, radius - 1 - d * 2)
+                        .update()
+                }
+            }
+            this.MINERAL_MAP[key] = { ...info, texture, visiable: false }
+        })
+    }
+
+    /**
+     * 读取当前世界所有矿脉
+     * @returns {Object<string, VeinEntry[]>} 按维度分组的矿脉
+     */
+    static loadVeins() {
+        const level = clientLevel()
+        const veinList = IeMineral.ExcavatorHandler.getMineralVeinList()
+        const veins = {}
+
+        const keys = veinList.keySet().iterator()
+        while (keys.hasNext()) {
+            const key = keys.next()
+            const dim = `${new DeobfRef(key).get('location', 'field_25138', 'value', 'f_135777_')}`
+            const arr = []
+            const it = veinList.get(key).iterator()
+            while (it.hasNext()) {
+                const v = it.next()
+                const pos = v.getPos()
+                const mineral = v.getMineral(level)
+                arr.push({
+                    x: new DeobfRef(pos).call(['x', 'comp_638', 'f_140723_']),
+                    z: new DeobfRef(pos).call(['z', 'comp_639', 'f_140724_']),
+                    radius: v.getRadius(),
+                    mineral: mineral.getPlainName(),
+                    depletion: v.getDepletion()
+                })
+            }
+            veins[dim] = arr
+        }
+        return veins
+    }
+
+    /**
+     * 生成提示框文本
+     * @param {VeinEntry} entry
+     * @returns {string[]}
+     */
+    static detailsOf(entry) {
+        let mineral = this.MINERAL_MAP[entry.mineral]
+        if (!mineral) return [`未知矿脉: ${entry.mineral}`]
+        let register = Client.getRegistryManager()
+        let handle = v => `${register.getItem(v.stack).getName()}(${Math.round(v.chance * 100)}%)`
+        return [
+            `矿脉: ${mineral.transName}`,
+            `中心: ${entry.x}, ${entry.z}`,
+            `半径: ${entry.radius}`,
+            `储量: ${this.MAX - entry.depletion} (${Math.round((1 - entry.depletion / this.MAX) * 100)}%)`,
+            `矿物: ${mineral.outputs.map(handle)}`,
+            `废渣: ${mineral.spoils.map(handle)}`,
+        ]
     }
 }
 
-bus?.stop()
-Hud.clearDraw2Ds()
-if (screen_listener)
-    JsMacros.off(screen_listener)
+/** @type {EventBus} 事件总线 */
+const bus = new EventBus()
+/** @type {XaeroOverlayManager|null} 渲染层管理器 */
+let overlay = null
+/** @type {Draw2DUtils|null} 过滤面板的裁剪画布 */
+let filter_d2d = null
+/** @type {MultiSelect|null} 过滤面板 */
+let filter_panel = null
+/** @type {string|null} 过滤面板监听 id */
+let filter_listener = null
+
+/** @type {Draw2D|null} 矿脉渲染共用的 Draw2D */
+let d2dBuilder = Hud.createDraw2D()
+/** 每个矿物 key → 已注册的元素句柄数组（const，内容可变） */
+const veinHandles = {}
+/** 每个矿物 key → 该矿物所有矿脉条目（const，内容可变） */
+const veinEntries = {}
+/** 上一帧鼠标悬停的矿脉（用于渲染 tooltip） */
+let hoveredEntry = null
+
+/** @type {string|null} OpenScreen 监听 id */
+let screen_listener = null
+/** @type {IScreen|null} 当前打开的世界地图屏幕 */
+let currentMapScreen = null
+
+/**
+ * 为单个矿脉条目生成 render 回调
+ * @param {VeinEntry} entry
+ * @returns {Function}
+ */
+function makeVeinRender(entry) {
+    const info = IeMineral.MINERAL_MAP[entry.mineral] ?? IeMineral.MINERAL_MAP.none
+    const texture = info.texture
+    const renderM = DeobfRef.methodName(ModBuilder.IMPORT.Renderable, 'render', 'method_25394', 'm_88315_')
+
+    return JavaWrapper.methodToJava((args) => {
+        try {
+            const [graphics, e, localX, localY, rinfo, scale, hovered, isWorldMap] = args
+            if (isWorldMap && scale < 0.5) return true
+            const r = e.radius * scale
+            // 矿脉半径
+            const circle = d2dBuilder.imageBuilder()
+                .fromCustomImage(texture.circle)
+                .alpha(isWorldMap ? 150 : 180)
+                .pos((localX - r) | 0, (localY - r) | 0)
+                .size((r * 2) | 0, (r * 2) | 0)
+                .build()
+            circle[renderM](graphics, 0, 0, 0)
+            // 矿脉中心
+            const iconSize = Math.max(24, scale)
+            const icon = d2dBuilder.itemBuilder()
+                .item(Client.getRegistryManager().getItemStack(texture.icon, '{Enchantments:[{id:-1,lvl:-1}]}'))
+                .pos((localX - iconSize / 2) | 0, (localY - iconSize / 2) | 0)
+                .scale(iconSize / 16)
+                .build()
+            icon[renderM](graphics, 0, 0, 0)
+            // 悬停检测
+            if (isWorldMap && filter_d2d && XaeroOverlayManager.isHovered(e.x, e.z, e.radius, scale))
+                hoveredEntry = entry
+        } catch (err) {
+            FS.open('log.txt').append(`${err}\n`)
+        }
+        return true
+    })
+}
+
+/**
+ * 注册单个矿脉元素
+ * @param {VeinEntry} entry
+ * @returns {object[]} 元素句柄
+ */
+function addVeinElement(entry) {
+    const info = IeMineral.MINERAL_MAP[entry.mineral] ?? IeMineral.MINERAL_MAP.none
+    const cx = entry.x | 0
+    const cz = entry.z | 0
+    const handles = overlay.addElement(
+        cx, cz, info.texture.color, entry.radius * 2, makeVeinRender(entry),
+        {
+            radius: entry.radius,
+            depletion: entry.depletion,
+            mineral: entry.mineral,
+            icon: info.texture.icon
+        }
+    )
+    return handles
+}
+
+/**
+ * 按矿物 key 重新同步元素（过滤面板变化时调用）
+ * @param {string} key 矿物 key
+ */
+function syncVeinVisibility(key) {
+    const visible = IeMineral.MINERAL_MAP[key]?.visiable
+    if (veinHandles[key]) {
+        for (const h of veinHandles[key])
+            overlay.removeElement(h)
+        veinHandles[key] = []
+    }
+    if (visible)
+        veinHandles[key] = veinEntries[key].map(v => addVeinElement(v))
+}
+
+
+/**重载当前维度矿脉数据，重建分组与渲染元素 */
+function reloadVeinData() {
+    for (const k of Object.keys(veinEntries)) delete veinEntries[k]
+    for (const k of Object.keys(veinHandles)) delete veinHandles[k]
+    hoveredEntry = null
+    const veins = IeMineral.loadVeins()
+    const dim = World.getDimension()
+    const veinList = veins[dim] || []
+    // 按矿物分组
+    for (const v of veinList) {
+        if (!veinEntries[v.mineral])
+            veinEntries[v.mineral] = []
+        veinEntries[v.mineral].push(v)
+    }
+    // 恢复可见性状态，重建渲染句柄
+    overlay.clearElements()
+    for (const k of Object.keys(veinEntries))
+        veinHandles[k] = IeMineral.MINERAL_MAP[k]?.visiable ? veinEntries[k].map(v => addVeinElement(v)) : []
+    // mclog(`已加载 ${veinList.length} 个矿脉（${Object.keys(veinEntries).length} 种矿物）`)
+}
+
+/**
+ * 在世界地图屏幕上创建过滤面板
+ * @param {IScreen} screen 世界地图屏幕（xaero.map.gui.GuiMap）
+ */
+function createFilterPanel(screen) {
+    let panelX = 25
+    let panelY = 10
+    let screenH = screen.getHeight()
+    let panelW = 200
+    let panelH = Math.min(300, screenH - 20)
+
+    filter_d2d = new Draw2DUtils({ x: panelX, y: panelY, width: panelW, height: panelH })
+    screen.addDraw2D(filter_d2d.target, panelX, panelY, panelW, panelH)
+
+    let selecteds = {}
+    let labels = {}
+    let colors = {}
+    for (let k of Object.keys(veinEntries)) {
+        selecteds[k] = IeMineral.MINERAL_MAP[k].visiable
+        labels[k] = `${(IeMineral.MINERAL_MAP[k].transName ?? k).replace(/^.+\./, '')} (${veinEntries[k].length})`
+        colors[k] = IeMineral.MINERAL_MAP[k]?.texture?.color ?? 0xFFFFFF
+    }
+
+    filter_panel = new MultiSelect({
+        selected: selecteds,
+        colors: colors,
+        x: 4, y: 4, rowHeight: 12, boxSize: 8,
+        gap: 4, scale: 0.8,
+        color: 0xFFFFFF, boxColor: 0xAAAAAA, checkColor: 0x55FF55, panelAlpha: 200,
+        screenOffsetX: panelX,
+        screenOffsetY: panelY,
+        onChange: (key, selected) => {
+            IeMineral.MINERAL_MAP[key].visiable = selected
+            syncVeinVisibility(key)
+        }
+    })
+    filter_panel.setLabels(labels)
+    filter_panel.render(filter_d2d.target)
+}
+
+/** 销毁过滤面板 */
+function destroyFilterPanel() {
+    if (filter_panel) { filter_panel.remove(); filter_panel = null }
+    if (filter_d2d) { filter_d2d.removeTooltip(); filter_d2d.target.unregister(); filter_d2d = null }
+}
+
+/** 主入口 */
+function main() {
+    // 注册 Xaero 渲染层
+    overlay = new XaeroOverlayManager().register()
+    reloadVeinData()
+    // 监听屏幕打开：只在 GuiMap 上挂过滤面板
+    screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
+        const screen = Hud.getOpenScreen()
+        destroyFilterPanel()
+        currentMapScreen = null
+        Client.runOnMainThread(JavaWrapper.methodToJava(() => { screen.getWidth() }), true, 1000)
+
+        if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
+            currentMapScreen = screen
+            createFilterPanel(screen)
+        }
+    }))
+
+    // 每 tick：更新 tooltip / 处理面板点击（仅面板存在时）
+    filter_listener = bus.addListener(event => {
+        if (event.consumed) return
+        if (!filter_panel || !filter_d2d) return
+        filter_panel.tick(event)
+        filter_d2d.tooltips = []
+        let screen = Reflection.getReflect(Hud.getOpenScreen())
+        if (hoveredEntry) {
+            filter_d2d.tooltips = IeMineral.detailsOf(hoveredEntry)
+            event.consumed = true
+            hoveredEntry = null
+        }
+    })
+}
+
+/** 清理 */
+function teardown() {
+    bus.stop()
+    if (screen_listener) { JsMacros.off(screen_listener); screen_listener = null }
+    destroyFilterPanel()
+    if (overlay) {
+        overlay.clearElements()
+        overlay.unregister()
+        overlay = null
+    }
+    for (const k of Object.keys(veinHandles)) delete veinHandles[k]
+    for (const k of Object.keys(veinEntries)) delete veinEntries[k]
+    hoveredEntry = null
+    currentMapScreen = null
+}
+
+try {
+    JsMacros.assertEvent(event, 'Service')
+    setToggle(true)
+    event.stopListener = JavaWrapper.methodToJava(() => {
+        setToggle(false)
+        teardown()
+    })
+} catch {
+    setToggle(!isToggle())
+}
+
+if (isToggle()) {
+    bus.start()
+    IeMineral.init()
+    main()
+
+    const VEIN_RELOAD_TICK_INTERVAL = 20 * 20
+    let veinReloadTickCounter = 0
+    let latest_dim = World.getDimension()
+    while (isToggle()) {
+        veinReloadTickCounter += 1
+        let cur_dim = World.getDimension()
+        if (veinReloadTickCounter >= VEIN_RELOAD_TICK_INTERVAL || latest_dim != cur_dim) {
+            veinReloadTickCounter = 0
+            reloadVeinData()
+        }
+        latest_dim = cur_dim
+        Client.waitTick()
+    }
+    teardown()
+}

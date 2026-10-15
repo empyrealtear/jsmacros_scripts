@@ -1,4 +1,4 @@
-# jsmacros宏模组脚本合集
+<img width="1161" height="861" alt="QQ_1792060187684" src="https://github.com/user-attachments/assets/f608a079-02c1-468e-b8b9-cbd96cdc79f6" /># jsmacros宏模组脚本合集
 
 - 描述：为minecraft游戏jsmacros模组（以下简称jsm）编写的脚本
 
@@ -7,7 +7,7 @@
 - [JS Macros](https://www.mcmod.cn/class/10531.html)
 - [JS Macros CE 社区版](https://modrinth.com/mod/jsmacrosce)
 - [JS Macros Reloaded 重制版](https://modrinth.com/mod/jsmacros-reloaded)
-
+- [JS Macros 各版本收录](https://jsmacrosce.github.io/Version-Finder)
 ## 模组文档
 
 - [JS Macros官方版文档](https://jsmacros.wagyourtail.xyz)

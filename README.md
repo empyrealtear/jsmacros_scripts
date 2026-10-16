@@ -8,12 +8,15 @@
 - [JS Macros CE 社区版](https://modrinth.com/mod/jsmacrosce)
 - [JS Macros Reloaded 重制版](https://modrinth.com/mod/jsmacros-reloaded)
 - [JS Macros 各版本收录](https://jsmacrosce.github.io/Version-Finder)
+
 ## 模组文档
 
-- [JS Macros官方版文档](https://jsmacros.wagyourtail.xyz)
-- [JS Macros社区版文档](https://jsmacrosce.com)
-- [JS Macros群友版文档](https://jsmacros.mynotes.world)、[快速开始](https://jsmacros.mynotes.world/quick_start/#_6)
-
+- [推荐编辑器: VSCode](https://code.visualstudio.com/)
+- [JS Macros官方文档](https://jsmacros.wagyourtail.xyz)
+- [JS Macros社区文档](https://jsmacrosce.com)
+- [JS Macros群友文档](https://jsmacros.mynotes.world)、[仓库](https://github.com/TheStoneFish/JsMacros-doc)、[快速开始](https://jsmacros.mynotes.world/quick_start/#_6)
+- [Js Macros智能提示](https://github.com/TheStoneFish/JsMacros-template)
+- [Minecraft Mapping混淆名](https://mappings.dev)
 - [脚本模板](./脚本模板.js)
 
 ## 脚本清单

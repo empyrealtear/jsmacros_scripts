@@ -14,6 +14,8 @@
 - [JS Macros社区版文档](https://jsmacrosce.com)
 - [JS Macros群友版文档](https://jsmacros.mynotes.world)、[快速开始](https://jsmacros.mynotes.world/quick_start/#_6)
 
+- [脚本模板](./脚本模板.js)
+
 ## 脚本清单
 
 - JEI/REI聚焦物品信息获取: [EnoughItemsAPI.js](./EnoughItemsAPI.js)

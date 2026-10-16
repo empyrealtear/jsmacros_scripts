@@ -1237,7 +1237,7 @@ class RadarMarker {
                     .rotation(deg).rotateCenter(true)
                     .build()
                 img[self.render](graphics, 0, 0, 0)
-            } catch (err) { mclog(`[地图渲染管线] ${err} [${RadarMarker.settings}] [${RadarMarker.utils}]`, 12) }
+            } catch (err) { mclog(`[地图渲染管线] ${err}]`, 12) }
             return true
         })
     }

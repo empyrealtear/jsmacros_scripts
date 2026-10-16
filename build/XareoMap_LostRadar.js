@@ -1226,8 +1226,8 @@ class RadarMarker {
                 const tex = isLarge ? state.largeTexture : state.texture
                 if (!tex) return false
                 let mapSize = RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize()
-                const isLocked = (RadarMarker.settings && RadarMarker.settings.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
-                    || RadarMarker.utils && RadarMarker.utils.getEffectiveNorthLocked(mapSize/ 2, 0)
+                const isLocked = (RadarMarker.settings?.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
+                    || (RadarMarker.utils?.getEffectiveNorthLocked(mapSize/ 2, 0))
                 const half = (e.size / 2) * scale
                 const deg = isWorldMap ? 0 : isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
                 const img = self.d2d.imageBuilder()
@@ -1237,7 +1237,7 @@ class RadarMarker {
                     .rotation(deg).rotateCenter(true)
                     .build()
                 img[self.render](graphics, 0, 0, 0)
-            } catch (err) { mclog(`[地图渲染管线] ${err}`, 12) }
+            } catch (err) { mclog(`[地图渲染管线] ${err} [${RadarMarker.settings}] [${RadarMarker.utils}]`, 12) }
             return true
         })
     }

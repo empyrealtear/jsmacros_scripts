@@ -25,7 +25,7 @@
 - RS精致存储操作终端库存: [RSUtils.js](./lib/RSUtils.js)
 - 反混淆映射表反射法: [DeobfReflect.js](./lib/DeobfReflect.js)
 - Xaero地图自定义渲染: [XaeroMapOverlay.js](./lib/XaeroMapOverlay.js)
-- 
+
 ### 应用类
 - 机动柴油动力油田扫描: [CreateOilScaner.js](./build/CreateOilScaner.js)、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/page/柴油动力油田预览.html)
 - 沉浸工程矿脉预览: [XareoMap_IEVeins.js](./build/XareoMap_IEVeins.js)、[沉浸工程矿脉预览(网页版)](https://empyrealtear.github.io/jsmacros_scripts/page/沉浸工程矿脉预览.html)

@@ -1,6 +1,6 @@
 // 脚本名称: 失落城市雷达数据
 // 功能介绍: 在Xaero世界地图上显示失落城市雷达数据（鼠标悬停区块显示tooltip，Shift+左键标记已去过，自动记录有建筑的区块，H键切换标记渲染）
-// 依赖模组: jsmacros、Xaero地图(Xaero's World Map)、失落城市雷达(LostRadar)
+// 依赖模组: jsmacros、Xaero地图(Xaero's World Map、MiniMap)、失落城市雷达(LostRadar)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 自动记录停留过的建筑区块，允许添加为常驻服务脚本，修复未正确获取维度名
 // 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
@@ -917,7 +917,7 @@ class EventBus {
                     else if (rec.clickTimer <= Date.now())
                         rec.handle(event), this.remove(key)
                 } catch (e) {
-                    Chat.log(`[EventBus] handler 异常: ${e}`)
+                    // Chat.log(`[EventBus] handler 异常: ${e}`)
                 }
             }
         }))
@@ -1067,7 +1067,7 @@ const MarkerState = {
                     .drawRoundRect(3, 3, 9, 9, 8, 8).drawRect(0, 0, 15, 15)
                     .update()
             } catch (e) {
-                Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
+                // Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
             }
         }
     }
@@ -1117,7 +1117,7 @@ class VisitedStore {
                     }
                 }
             } catch (e) {
-                Chat.log(`§c[雷达] 加载 ${p} 失败: ${e}`)
+                // Chat.log(`§c[雷达] 加载 ${p} 失败: ${e}`)
             }
         }
         return this.cache
@@ -1128,10 +1128,10 @@ class VisitedStore {
         if (!this.cache) return
         try {
             const dir = this.path.substring(0, this.path.lastIndexOf('/'))
-            if (!FS.exists(dir)) FS.open(dir).mkdir()
+            if (!FS.exists(dir)) FS.makeDir(dir)
             FS.open(this.path).write(JSON.stringify(this.cache))
         } catch (e) {
-            Chat.log(`§c[雷达] 保存已去过记录失败: ${e}`)
+            // Chat.log(`§c[雷达] 保存已去过记录失败: ${e} ${this.path}`)
         }
     }
 
@@ -1167,7 +1167,8 @@ class VisitedStore {
 
 /** 雷达标记：管理光标周边区块的注册状态渲染 */
 class RadarMarker {
-    static utils = Java.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static utils = DeobfRef.Type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static settings = DeobfRef.Type('xaero.minimap.XaeroMinimap')?.instance?.getSettings()
     static minimap = Java.type('xaero.hud.minimap.BuiltInHudModules').MINIMAP
     /**
      * @param {XaeroOverlayManager} overlay 渲染层管理器
@@ -1224,10 +1225,11 @@ class RadarMarker {
                 const [graphics, e, info, localX, localY, scale, isWorldMap, hovered] = args
                 const tex = isLarge ? state.largeTexture : state.texture
                 if (!tex) return false
-                const isLocked = RadarMarker.utils.getEffectiveNorthLocked(
-                    RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize() / 2, 0)
+                let mapSize = RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize()
+                const isLocked = (RadarMarker.settings && RadarMarker.settings.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
+                    || RadarMarker.utils && RadarMarker.utils.getEffectiveNorthLocked(mapSize/ 2, 0)
                 const half = (e.size / 2) * scale
-                const deg = isWorldMap || isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
+                const deg = isWorldMap ? 0 : isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
                 const img = self.d2d.imageBuilder()
                     .fromCustomImage(tex).alpha(isWorldMap ? 200 : 180)
                     .pos((localX - half) | 0, (localY - half) | 0)
@@ -1438,12 +1440,14 @@ function main() {
     interact_listener = JsMacros.on("InteractBlock", JavaWrapper.methodToJava((e, ctx) => {
         try {
             const id = `${e.block.getId()}`
-            if (!/lootr_/.test(id)) return
+            const catalog = 'deceasedcraft:building_catalog'
+            const mainHand = Player.getPlayer().getMainHand().getItemId()
             const pos = e.block.getBlockPos()
             const cx = pos.getX() >> 4
             const cz = pos.getZ() >> 4
             const dim = World.getDimension()
-            if (markChunkAt(cx, cz, dim, false, true)) {
+            if (mainHand == catalog || /lootr_/.test(id)) {
+                markChunkAt(cx, cz, dim, false, true)
                 adv.loads()
                 const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
                 if (entry) {

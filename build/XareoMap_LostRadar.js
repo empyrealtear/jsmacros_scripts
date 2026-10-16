@@ -7,115 +7,76 @@
 // 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，按存档名隔离存储数据，若已使用之前版本需要手动改为新文件名
 // 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
 // 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
+// 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
 
-const scriptName = 'XareoMap_LostRadar.ToggleScript'
-/** 已去过区块的存储路径 */
-const VISITED_PATH = () => `lostradar_visited_${World.getWorldIdentifier()}.json`
-/** 渲染半径（区块） */
-const MARKER_RADIUS = 8
-
-
-const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
-    .append("[").withColor(0x5).append(scriptName).withColor(0x5)
-    .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
-
-const isToggle = () => GlobalVars.getBoolean(scriptName)
-const setToggle = (v) => mclog(GlobalVars.putBoolean(scriptName, v) ? "启用" : "关闭")
-
-/** 
- * @typedef {com.mojang.blaze3d.platform.Window} Window
- * @typedef {net.minecraft.network.chat.Component} Component
- * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
- * @typedef {net.minecraft.client.font.TextRenderer} TextRenderer
- * 
- * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Pos2D} type_pos2d
- * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Vec2D} type_vec2d
- * @typedef {{timestamp:number,interval:number,mouse:type_pos2d}} eventCache
- * @typedef {'holding'|'pressed'|'released'} enum_keyState
- * @typedef {(event:Event)=>void} handle_eventCallback
- * @typedef {{
- *  keyPressed: ((keyCode:int,modifiers:int)=>void),
- *  charTyped: ((char:char,modifiers:int)=>void),
- *  mouseDown: ((pos:type_pos2d,button:int,dbclick:boolean)=>void),
- *  mouseUp: ((pos:type_pos2d,button:int,dbclick:boolean)=>void),
- *  mouseDrag: ((vec:type_vec2d,button:int)=>void),
- * }} handle_screenCallback
- */
+const scriptName = file.getName().replace(/\.(js|ts)$/, '')
+const _session = `${scriptName}:session`
+const _enabled = `${scriptName}:enabled`
+const session = GlobalVars.incrementAndGetInt(_session)
+const _listener = {
+    tick: null, counter: 0, step: 3, offHandle: null,
+    on(handle) {
+        this.tick = JsMacros.on('Tick', JavaWrapper.methodToJava(() => {
+            if (!isEnabled()) return this.off()
+            if (++this.counter % this.step != 0) return
+            handle?.()
+        }))
+        return this
+    },
+    off() { this.offHandle?.(); this.tick && JsMacros.off(this.tick); this.tick = null; return this }
+}
+const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color % 16).toString(16)}${msg}`)
+const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
+const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
 
 /** @type {JavaClass<ChunkPos>} */
 const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
 /** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
 const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
 
-/** @returns {ClientLevel} 主世界 ClientLevel */
-function getClientLevel() {
-    const mc = Client.getMinecraft()
-    return new DeobfRef(mc).get('level', 'field_1687', 'world', 'f_91073_')
-}
-
-/**
- * 获取玩家当前所在区块 key
- * @returns {string|null} "cx,cz"；玩家不存在返回 null
- */
-function getPlayerChunkKey() {
-    const player = Player.getPlayer()
-    if (!player) return null
-    const chunk = player.getChunk()
-    return `${chunk.getChunkX()},${chunk.getChunkZ()}`
-}
-
-/**
- * 扩展相邻同名建筑区块
- * @param {number} cx 中心区块 X
- * @param {number} cz 中心区块 Z
- * @param {string} dim 维度
- * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} centerEntry 中心区块条目
- * @returns {string[]} 区块 key 列表（含自身）
- */
-function expandSameName(cx, cz, dim, centerEntry) {
-    const name = centerEntry.name()
-    const visited = new Set([`${cx},${cz}`])
-    if (!name.startsWith('multi_')) return Array.from(visited)
-
-    const level = getClientLevel()
-    const queue = [[cx, cz]]
-
-    while (queue.length > 0) {
-        const [x, z] = queue.shift()
-
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = x + dx
-            const nz = z + dz
-            const nkey = `${nx},${nz}`
-            if (visited.has(nkey)) continue
-
-            let nEntry = null
-            try {
-                nEntry = ClientMapData.getPaletteEntry(level, new ChunkPos(nx, nz))
-            } catch (e) { /* 忽略 */ }
-            if (!nEntry || nEntry.name() !== name) continue
-
-            visited.add(nkey)
-            queue.push([nx, nz])
-        }
-    }
-    return Array.from(visited)
-}
-
 /** 反射工具 @template T */
 class DeobfRef {
-    /** @param {T} v 被反射包装的对象或 Java 类 */
-    constructor(v) {
-        /** @type {T} */
-        this.target = v
-        /** @type {Packages.org.joor.Reflect} */
-        this.reflect = Reflection.getReflect(this.target)
+    /** 探测类名
+     * @param {string[]} names 候选名
+     * @returns {string?}
+     */
+    static className(...names) {
+        for (const n of names)
+            try { return Reflection.getClass(n).getName() } catch { }
+        return null
     }
+    /**
+     * 探测字段名
+     * @param {string} cls
+     * @param {string[]} names 候选名
+     * @returns {string?}
+     */
+    static fieldName(cls, ...names) {
+        const fields = Reflection.getClass(cls).getDeclaredFields()
+        for (let n of names)
+            for (let m of fields)
+                if (m.getName() === n) return n
+        return null
+    }
+    /**
+     * 探测方法名
+     * @param {string} cls
+     * @param {string[]} names 候选名
+     * @returns {string?}
+     */
+    static methodName(cls, ...names) {
+        const methods = Reflection.getClass(cls).getDeclaredMethods()
+        for (let n of names)
+            for (let m of methods)
+                if (m.getName() === n) return n
+        return null
+    }
+
     /**
      * 按顺序尝试加载类，返回第一个成功的
      * @template {string} C
      * @param {C[]} class_names
-     * @returns {GetJava.Type$Graal<C>|null}
+     * @returns {GetJava.Type$Graal<C>?}
      */
     static Type(...class_names) {
         for (let item of class_names)
@@ -126,18 +87,27 @@ class DeobfRef {
      * 获取类并包装为 DeobfRef
      * @template {string} C
      * @param {C[]} class_names
-     * @returns {DeobfRef<C>|null}
+     * @returns {DeobfRef<C>?}
      */
     static Class(...class_names) {
-        let type = DeobfRef.Type(...class_names)
-        return type ? new DeobfRef(type) : null
+        let type = this.Type(...class_names)
+        return type ? new this(type) : null
     }
+
+    /** @param {T} v 被反射包装的对象或 Java 类 */
+    constructor(v) {
+        /** @type {T} */
+        this.target = v
+        /** @type {Packages.org.joor.Reflect} */
+        this.reflect = Reflection.getReflect(this.target)
+    }
+
     /** @returns {string} 类名 */
     get classname() { return Reflection.getClassName(this.target) }
     /** @returns {GetJava.Type$Graal<T>} Graal 版 Java 类 */
-    get type() { return Java.type(Reflection.getClassName(this.target)) }
+    get type() { return Java.type(this.classname) }
     /** @returns {JavaClass<T>} 反射版 Java 类 */
-    get class() { return Reflection.getClass(Reflection.getClassName(this.target)) }
+    get class() { return Reflection.getClass(this.classname) }
     /** @returns {string[]} 所有字段名（缓存） */
     get fields() { return this._fields ??= this.class.getDeclaredFields().map(v => v.getName()) }
     /** @returns {string[]} 所有方法名（缓存） */
@@ -148,9 +118,9 @@ class DeobfRef {
     /**
      * 获取第一个存在的字段名
      * @param {string[]} names 候选字段名（按优先级）
-     * @returns {string|null}
+     * @returns {string?}
      */
-    getFieldName(...names) {
+    fieldName(...names) {
         let fields = this.fields
         for (let name of names)
             if (fields.includes(name)) return name
@@ -162,7 +132,7 @@ class DeobfRef {
      * @returns {*} 字段值；未找到返回 null
      */
     get(...names) {
-        let name = this.getFieldName(...names)
+        let name = this.fieldName(...names)
         if (name)
             try { return this.reflect.field(name).get() }
             catch { return this.target[name] }
@@ -175,7 +145,7 @@ class DeobfRef {
      * @returns {*} 设置后的字段值；未找到返回 null
      */
     set(value, ...names) {
-        let name = this.getFieldName(...names)
+        let name = this.fieldName(...names)
         if (name)
             try { return this.reflect.set(name, value).get() }
             catch {
@@ -187,9 +157,9 @@ class DeobfRef {
     /**
      * 获取第一个存在的方法名
      * @param {string[]} method_names 候选方法名（按优先级）
-     * @returns {string|null}
+     * @returns {string?}
      */
-    getMethodName(...method_names) {
+    methodName(...method_names) {
         let methods = this.methods
         for (let name of method_names)
             if (methods.includes(name))
@@ -218,30 +188,472 @@ class DeobfRef {
      * @returns {*} 方法返回值；未找到返回 null
      */
     call(method_names, ...args) {
-        let name = this.getMethodName(...method_names)
+        let name = this.methodName(...method_names)
         return name ? this.invoke(name, ...args) : null
     }
+}
+/** 长类名集中管理 */
+const IMPORT = {
+    // === Java 标准 ===
+    Object: 'java.lang.Object',
+    Double: 'java.lang.Double',
+    Boolean: 'java.lang.Boolean',
+    Float: 'java.lang.Float',
+    String: 'java.lang.String',
+    ArrayList: 'java.util.ArrayList',
+    Collections: 'java.util.Collections',
+    Iterator: 'java.util.Iterator',
+    Function: 'java.util.function.Function',
+    Throwable: 'java.lang.Throwable',
+    // === MC 类（探测） ===
+    GuiGraphics: DeobfRef.className(
+        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
+        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_'),
+    BufferSource: DeobfRef.className(
+        'net.minecraft.client.renderer.MultiBufferSource$BufferSource', 'net.minecraft.class_4597$class_4598',
+        'net.minecraft.client.render.VertexConsumerProvider$Immediate', 'net.minecraft.src.C_4139_$C_4140_'),
+    Minecraft: DeobfRef.className(
+        'net.minecraft.client.Minecraft', 'net.minecraft.class_310',
+        'net.minecraft.client.MinecraftClient', 'net.minecraft.src.C_3391_'),
+    Renderable: DeobfRef.className(
+        'net.minecraft.client.gui.components.Renderable', 'net.minecraft.class_4068',
+        'net.minecraft.client.gui.Drawable', 'net.minecraft.src.C_252359_'),
+    // === Xaero 小地图 ===
+    Minimap: 'xaero.minimap.XaeroMinimap',
+    MiniLocation: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
+    MiniInfo: 'xaero.hud.minimap.element.render.MinimapElementRenderInfo',
+    MiniProvider: 'xaero.hud.minimap.element.render.MinimapElementRenderProvider',
+    MiniReader: 'xaero.hud.minimap.element.render.MinimapElementReader',
+    MiniRenderer: 'xaero.hud.minimap.element.render.MinimapElementRenderer',
+    MiniRendererHandler: 'xaero.hud.minimap.element.render.MinimapElementRendererHandler',
+    MiniFBO: 'xaero.common.minimap.render.MinimapFBORenderer',
+    MiniTextureProvider: 'xaero.common.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
+    // === Xaero 世界地图 ===
+    WorldMap: 'xaero.map.WorldMap',
+    WorldLocation: 'xaero.map.element.render.ElementRenderLocation',
+    WorldInfo: 'xaero.map.element.render.ElementRenderInfo',
+    WorldProvider: 'xaero.map.element.render.ElementRenderProvider',
+    WorldReader: 'xaero.map.element.render.ElementReader',
+    WorldRenderer: 'xaero.map.element.render.ElementRenderer',
+    WorldTextureProvider: 'xaero.map.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
+}
+/** 动态类构建工厂（小地图 + 世界地图） */
+class ModBuilder {
+    static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
+    static namespace = 'XaeroOverlay'
+    static suffix = '' + `_${Date.now()}`
+
+    /** 共用 Element 短名 */
+    static Element = `${this.namespace}_Element${this.suffix}`
+    static Context = `${this.namespace}_Context${this.suffix}`
+    /** 小地图短名 */
+    static MINIMAP = {
+        Provider: `${this.namespace}_MinimapProvider${this.suffix}`,
+        Reader: `${this.namespace}_MinimapReader${this.suffix}`,
+        Renderer: `${this.namespace}_MinimapRenderer${this.suffix}`,
+    }
+    /** 世界地图短名 */
+    static WORLDMAP = {
+        Provider: `${this.namespace}_WorldMapProvider${this.suffix}`,
+        Reader: `${this.namespace}_WorldMapReader${this.suffix}`,
+        Renderer: `${this.namespace}_WorldMapRenderer${this.suffix}`,
+    }
+
+    static className(name) { return this.package + name }
+    static load(name) { try { return Reflection.getClassFromClassBuilderResult(name) } catch { return null } }
+    /** 构建类
+     * @template {string} C
+     * @param {{ name:C, extend:string, fields:string[], constructors:string[], methods:string[] }} opts 
+     * @returns {JavaClass<C>}
+     */
+    static builder(opts) {
+        const { name, extend, fields, constructors, methods } = opts
+        let builder = Reflection.createClassBuilder(name, Java.type(extend ?? 'java.lang.Object'))
+        fields?.forEach(v => builder.addField(v))
+        constructors?.forEach(v => builder.addConstructor(v))
+        methods?.forEach(v => builder.addMethod(v))
+        return builder.finishBuildAndFreeze()
+    }
+
+    static createElementClass() {
+        const name = this.Element
+        const { String, Function } = IMPORT
+        return this.load(name) ?? this.builder({
+            name: name,
+            fields: [
+                `public int x;`,
+                `public int z;`,
+                `public int color = 0x80FF0000;`,
+                `public int size = 16;`,
+                `public boolean large = false;`,
+                `public ${Function} render = null;`,
+            ],
+            constructors: [`public ${name}(int x, int z, int color, int size, boolean large, ${Function} render) {
+                this.x = x; this.z = z; this.color = color; this.size = size; this.large = large; this.render = render;
+            }`],
+            methods: [
+                `public double centerX() { return (this.x + 0.5) * 16.0; }`,
+                `public double centerZ() { return (this.z + 0.5) * 16.0; }`,
+                `public ${String} displayName() { return x + "," + z; }`,
+            ]
+        })
+    }
+    static createContextClass() {
+        const name = this.Context
+        const { ArrayList } = IMPORT
+        return this.load(name) ?? this.builder({
+            name: name,
+            fields: [
+                `public ${ArrayList} elements = new ${ArrayList}();`,
+                `public double scale = 1.0;`,
+                `public boolean enabled = true;`,
+            ],
+            constructors: [`public ${name}() { super(); }`],
+        })
+    }
+    static createProviderClass(name, extend, location) {
+        const { Object, Iterator, Collections, ArrayList, Minecraft } = IMPORT
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
+        const mcGet = DeobfRef.methodName(Minecraft, 'getInstance', 'method_1551', 'm_91087_')
+        const mcPlayerField = DeobfRef.fieldName(Minecraft, 'player', 'field_1724', 'f_91074_')
+        const entityCls = DeobfRef.className(
+            'net.minecraft.world.entity.Entity', 'net.minecraft.class_1297',
+            'net.minecraft.entity.Entity', 'net.minecraft.src.C_507_')
+        const pGetX = DeobfRef.methodName(entityCls, 'getX', 'method_23317', 'm_20185_')
+        const pGetZ = DeobfRef.methodName(entityCls, 'getZ', 'method_23321', 'm_20189_')
+        const MINI_MAX_DIST = 180
+        return this.load(name) ?? this.builder({
+            name: name, extend: extend,
+            fields: [`public ${Iterator} iterator = ${Collections}.emptyIterator();`],
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public void begin(${location} location, ${Object} ctx) {
+                    ${context} context = (${context}) ctx;
+                    if (location != ${location}.OVER_MINIMAP) {
+                        this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
+                        return;
+                    }
+                    ${ArrayList} filtered = new ${ArrayList}();
+                    ${Minecraft} mc = ${Minecraft}.${mcGet}();
+                    if (mc != null && mc.${mcPlayerField} != null) {
+                        double px = mc.${mcPlayerField}.${pGetX}();
+                        double pz = mc.${mcPlayerField}.${pGetZ}();
+                        double maxDistSq = java.lang.Math.pow(${MINI_MAX_DIST} / context.scale, 2.0);
+                        ${ArrayList} elements = context.elements;
+                        for (int i = 0; i < elements.size(); i++) {
+                            ${element} el = (${element}) elements.get(i);
+                            if (el == null) continue;
+                            double dx = el.centerX() - px;
+                            double dz = el.centerZ() - pz;
+                            if (dx * dx + dz * dz <= maxDistSq) filtered.add(el);
+                        }
+                    }
+                    this.iterator = filtered.iterator();
+                }`,
+                `public boolean hasNext(${location} loc, ${Object} ctx) {
+                    return this.iterator.hasNext();
+                }`,
+                `public ${Object} getNext(${location} loc, ${Object} ctx) {
+                    return this.iterator.hasNext() ? this.iterator.next() : null;
+                }`,
+                `public void end(${location} loc, ${Object} ctx) {
+                    this.iterator = ${Collections}.emptyIterator();
+                }`,
+            ]
+        })
+    }
+    static createReaderClass(name, extend, location) {
+        const { Object, String, Minecraft } = IMPORT
+        let elm = this.className(this.Element)
+        let ctx = this.className(this.Context)
+        return this.load(name) ?? this.builder({
+            name: name, extend: extend,
+            constructors: [`public ${name}() { super(); }`],
+            methods: [
+                `public boolean isHidden(${Object} e, ${Object} c) { return e == null; }`,
+                `public double getRenderX(${Object} e, ${Object} c, float p) { return ((${elm}) e).centerX(); }`,
+                `public double getRenderY(${Object} e, ${Object} c, float p) { return 0.0; }`,
+                `public double getRenderZ(${Object} e, ${Object} c, float p) { return ((${elm}) e).centerZ(); }`,
+                `public int getInteractionBoxLeft(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxRight(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxTop(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getInteractionBoxBottom(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getRenderBoxLeft(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getRenderBoxRight(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getRenderBoxTop(${Object} e, ${Object} c, float p) { return (int) -((${elm}) e).size / 2; }`,
+                `public int getRenderBoxBottom(${Object} e, ${Object} c, float p) { return (int) ((${elm}) e).size / 2; }`,
+                `public int getLeftSideLength(${Object} e, ${Minecraft} mc) { return ((${elm}) e).size; }`,
+                `public ${String} getMenuName(${Object} e) { return ((${elm}) e).displayName(); }`,
+                `public ${String} getFilterName(${Object} e) { return this.getMenuName(e); }`,
+                `public int getMenuTextFillLeftPadding(${Object} e) { return 0; }`,
+                `public int getRightClickTitleBackgroundColor(${Object} e) { return ((${elm}) e).color; }`,
+                `public boolean shouldScaleBoxWithOptionalScale() { return false; }`,
+                `public float getBoxScale(${location} loc, ${Object} e, ${Object} c) { return (float) ((${ctx}) c).scale; }`,
+                `public boolean isInteractable(${location} location, ${Object} element) { return true; }`,
+            ]
+        })
+    }
+
+    static createMinimapProviderClass() {
+        return this.createProviderClass(this.MINIMAP.Provider,
+            IMPORT.MiniProvider, IMPORT.MiniLocation)
+    }
+    static createMinimapReaderClass() {
+        return this.createReaderClass(this.MINIMAP.Reader,
+            IMPORT.MiniReader, IMPORT.MiniLocation)
+    }
+    static createMinimapRendererClass() {
+        const name = this.MINIMAP.Renderer
+        const {
+            MiniRenderer, MiniLocation, MiniInfo, BufferSource, MiniTextureProvider,
+            Object, GuiGraphics, Double, Boolean, Throwable
+        } = IMPORT
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
+        let reader = this.className(this.MINIMAP.Reader)
+        let provider = this.className(this.MINIMAP.Provider)
+        return this.load(name) ?? this.builder({
+            name: name, extend: MiniRenderer,
+            constructors: [`public ${name}(${context} ctx) { super(new ${reader}(), new ${provider}(), ctx); }`],
+            methods: [
+                `public boolean shouldRender(${MiniLocation} loc) {
+                    return loc == ${MiniLocation}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
+                `public int getOrder() { return 0; }`,
+                `public void preRender(${MiniInfo} info, ${BufferSource} buf, ${MiniTextureProvider} tex) {
+                    ((${context}) this.context).scale = xaero.common.HudMod.INSTANCE.getMinimap().getMinimapFBORenderer().getZoom();
+                }`,
+                `public void postRender(${MiniInfo} info, ${BufferSource} buf, ${MiniTextureProvider} tex) {}`,
+                `public boolean renderElement(
+                        ${Object} el, boolean hovered, boolean highlighted, double depth, float screenSizeBasedScale,
+                        double localX, double localY, ${MiniInfo} info, ${GuiGraphics} graphics, ${BufferSource} buf) {
+                    if (el == null || graphics == null || info == null) return false;
+                    if (!((${context}) this.context).enabled) return false;
+                    ${element} e = (${element}) el;
+                    if (e.render == null) return false;
+                    double scale = ((${context}) this.context).scale;
+                    if (!${Double}.isFinite(scale) || scale <= 0.0 || scale > 64.0) scale = 1.0;
+                    try {
+                        ${Object}[] args = new ${Object}[] {
+                            graphics, el, info,
+                            ${Double}.valueOf(localX),
+                            ${Double}.valueOf(localY),
+                            ${Double}.valueOf(scale),
+                            ${Boolean}.FALSE,
+                            ${Boolean}.valueOf(hovered)
+                        };
+                        ${Object} result = e.render.apply(args);
+                        return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
+                    } catch (${Throwable} t) {
+                        return false;
+                    }
+                }`,
+            ]
+        })
+    }
+
+    static createWorldMapProviderClass() {
+        return this.createProviderClass(this.WORLDMAP.Provider, IMPORT.WorldProvider, IMPORT.WorldLocation)
+    }
+    static createWorldMapReaderClass() {
+        return this.createReaderClass(this.WORLDMAP.Reader, IMPORT.WorldReader, IMPORT.WorldLocation)
+    }
+    static createWorldMapRendererClass() {
+        const name = this.WORLDMAP.Renderer
+        const {
+            WorldRenderer, WorldLocation, WorldInfo, BufferSource, WorldTextureProvider,
+            Object, GuiGraphics, Double, Float, Boolean, Throwable
+        } = IMPORT
+        let element = this.className(this.Element)
+        let context = this.className(this.Context)
+        let reader = this.className(this.WORLDMAP.Reader)
+        let provider = this.className(this.WORLDMAP.Provider)
+        return this.load(name) ?? this.builder({
+            name: name, extend: WorldRenderer,
+            constructors: [`public ${name}(${context} ctx) { super(ctx, new ${provider}(), new ${reader}()); }`],
+            methods: [
+                `public boolean shouldRender(${WorldLocation} location, boolean shadow) { return true; }`,
+                `public int getOrder() { return 0; }`,
+                `public boolean shouldBeDimScaled() { return false; }`,
+                `public void preRender(${WorldInfo} info, ${BufferSource} buf, ${WorldTextureProvider} rp, boolean shadow) {
+                    ((${context}) this.context).scale = info.scale;
+                }`,
+                `public void postRender(${WorldInfo} info, ${BufferSource} buf, ${WorldTextureProvider} rp, boolean shadow) {}`,
+                `public void renderElementShadow(${Object} e, boolean h, float os, double px, double py,
+                    ${WorldInfo} info, ${GuiGraphics} g, ${BufferSource} buf, ${WorldTextureProvider} rp) {}`,
+                `public boolean renderElement(
+                        ${Object} element, boolean hovered, double optionalDepth, float optionalScale,
+                        double partialX, double partialY, ${WorldInfo} info, ${GuiGraphics} graphics,
+                        ${BufferSource} bufferSource, ${WorldTextureProvider} rendererProvider) {
+                    if (!((${context}) this.context).enabled) return false;
+                    ${element} el = (${element}) element;
+                    if (el.render == null) return false;
+                    try {
+                        double scale = info.scale;
+                        ${Object}[] args = new ${Object}[] {
+                            graphics, el, info,
+                            ${Double}.valueOf(partialX),
+                            ${Double}.valueOf(partialY),
+                            ${Double}.valueOf(scale),
+                            ${Boolean}.TRUE,
+                            ${Boolean}.valueOf(hovered)
+                        };
+                        ${Object} result = el.render.apply(args);
+                        return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
+                    } catch (${Throwable} t) {
+                        return false;
+                    }
+                }`,
+            ]
+        })
+    }
+}
+/** 渲染层管理器（小地图 + 世界地图） */
+class XaeroOverlayManager {
+    /** @typedef {net.minecraft.network.chat.Component} Component */
+    constructor() {
+        /** @type {JavaClass?} 共用类 */
+        this.ElementCls = null
+        /** @type {JavaClass?} 共用类 */
+        this.ContextCls = null
+
+        /** @type {boolean} 小地图是否已注册 */
+        this.minimapInited = false
+        /** @type {xaero.hud.minimap.element.render.over.MinimapElementOverMapRendererHandler?} 小地图Handler实例 */
+        this.minimapHandler = null
+        /** @type {object?} 小地图 Context 实例 */
+        this.minimapContext = null
+        /** @type {object?} 小地图 Renderer 实例 */
+        this.minimapRenderer = null
+
+        /** @type {boolean} 世界地图是否已注册 */
+        this.worldMapInited = false
+        /** @type {xaero.map.element.MapElementRenderHandler?} 世界地图Handler 实例 */
+        this.worldMapHandler = null
+        /** @type {object?} 世界地图 Context 实例 */
+        this.worldMapContext = null
+        /** @type {object?} 世界地图 Renderer 实例 */
+        this.worldMapRenderer = null
+    }
+
+    /** 注册小地图渲染层 */
+    registerMinimap() {
+        if (this.minimapInited) return this
+        this.minimapHandler = Java.type(IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
+
+        ModBuilder.createMinimapProviderClass()
+        ModBuilder.createMinimapReaderClass()
+        const rendererCls = ModBuilder.createMinimapRendererClass()
+        this.minimapContext = Reflection.newInstance(this.ContextCls)
+        this.minimapRenderer = Reflection.newInstance(rendererCls, this.minimapContext)
+        this.minimapHandler.add(this.minimapRenderer)
+
+        this.minimapInited = true
+        mclog('小地图渲染层已注册')
+        return this
+    }
+    /** 注册世界地图渲染层 */
+    registerWorldMap() {
+        if (this.worldMapInited) return this
+        this.worldMapHandler = Java.type(IMPORT.WorldMap).mapElementRenderHandler
+
+        ModBuilder.createWorldMapProviderClass()
+        ModBuilder.createWorldMapReaderClass()
+        const rendererCls = ModBuilder.createWorldMapRendererClass()
+        this.worldMapContext = Reflection.newInstance(this.ContextCls)
+        this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext)
+
+        this.worldMapHandler.add(this.worldMapRenderer)
+        this.worldMapInited = true
+        mclog('世界地图渲染层已注册')
+        return this
+    }
+
+    /** 注册所有渲染层 */
+    register() {
+        this.ElementCls = ModBuilder.createElementClass()
+        this.ContextCls = ModBuilder.createContextClass()
+        this.registerMinimap()
+        this.registerWorldMap()
+        return this
+    }
+    /** 从渲染管线移除 */
+    unregister() {
+        if (this.minimapInited) {
+            const cls = Reflection.getClass(IMPORT.MiniRendererHandler)
+            const f = Reflection.getDeclaredField(cls, 'renderers')
+            f.setAccessible(true)
+            f.get(this.minimapHandler).remove(this.minimapRenderer)
+            this.minimapInited = false
+            this.minimapRenderer = this.minimapContext = null
+        }
+
+        if (this.worldMapInited) {
+            const f = this.worldMapHandler.getClass().getDeclaredField('renderers')
+            f.setAccessible(true)
+            if (f != null) f.get(this.worldMapHandler).remove(this.worldMapRenderer)
+            this.worldMapInited = false
+            this.worldMapRenderer = this.worldMapContext = null
+        }
+
+        mclog('渲染层已卸载')
+        return true
+    }
+
+    /**
+     * 添加一个高亮元素
+     * @param {number} cx X
+     * @param {number} cz Z
+     * @param {number} [color=0x80FF0000] ARGB 颜色
+     * @param {number} [size=16] 尺寸（方块单位）
+     * @param {boolean} [large=false] 是否大型建筑
+     * @param {Function?} [render=null] 元素渲染回调
+     * @returns {object} 元素实例
+     */
+    addElement(cx, cz, color = 0x80FF0000, size = 16, large = false, render = null) {
+        if (!this.minimapInited && !this.worldMapInited) throw new Error('XaeroOverlayManager 未 register')
+
+        const ElementCls = this.ElementCls
+        const el = Reflection.newInstance(ElementCls, cx | 0, cz | 0, color | 0, size | 0, !!large, render)
+        this.minimapInited && this.minimapContext.elements.add(el)
+        this.worldMapInited && this.worldMapContext.elements.add(el)
+        return el
+    }
+    /**
+     * 移除一个元素
+     * @param {object} handle addElement 返回的元素实例
+     * @returns {boolean} 是否移除成功
+     */
+    removeElement(handle) {
+        if (!handle) return false
+        let removed = false
+        if (this.minimapInited) removed = this.minimapContext.elements.remove(handle) || removed
+        if (this.worldMapInited) removed = this.worldMapContext.elements.remove(handle) || removed
+        return removed
+    }
+    /** 清空所有元素 */
+    clearElements() {
+        this.minimapInited && this.minimapContext.elements.clear()
+        this.worldMapInited && this.worldMapContext.elements.clear()
+    }
+    setEnabled(v) {
+        if (this.minimapInited) this.minimapContext.enabled = v
+        if (this.worldMapInited) this.worldMapContext.enabled = v
+        return v
+    }
+    isEnabled() {
+        return (this.minimapInited && this.minimapContext.enabled)
+            || (this.worldMapInited && this.worldMapContext.enabled)
+    }
+    toggle() { return this.setEnabled(!this.isEnabled()) }
 }
 
 /** Draw2D拓展：支持裁剪画布+渲染提示框
  * @typedef {{x:int,y:int,width:int,height:int}} Region 显示区域
+ * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
  */
 class Draw2DUtils {
-    /** @type {DeobfRef<org.lwjgl.glfw.GLFW>} */
-    static GLFW = DeobfRef.Class('org.lwjgl.glfw.GLFW')
-    /** @type {DeobfRef<Window>} */
-    static Window = new DeobfRef(new DeobfRef(Client.getMinecraft()).call(['getWindow', 'method_22683', 'm_91268_']))
-    /**
-     * @enum {int}
-     * @link https://github.com/LWJGL/lwjgl3/blob/master/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java
-     */
-    static CursorTypes = {
-        DEFAULT: 0x36001, ARROW: 0x36001, IBEAM: 0x36002, CROSSHAIR: 0x36003,
-        POINTING_HAND: 0x36004, RESIZE_EW: 0x36005, RESIZE_NS: 0x36006,
-        RESIZE_NWSE: 0x36007, RESIZE_NESW: 0x36008, RESIZE_ALL: 0x36009,
-        NOT_ALLOWED: 0x3600A, HRESIZE: 0x36005, VRESIZE: 0x36006, HAND: 0x36004
-    }
-    /** @type {TextRenderer} */
+    /** @type {net.minecraft.client.font.TextRenderer} */
     static TextRenderer = new DeobfRef(Client.getMinecraft())
         .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
     /** @type {JavaClass<Draw2D>} */
@@ -252,10 +664,6 @@ class Draw2DUtils {
     static DrawContext = DeobfRef.Class(
         'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
         'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
-    /** @type {DeobfRef<com.mojang.blaze3d.platform.cursor.CursorType>} */
-    static CursorType = DeobfRef.Class(
-        'com.mojang.blaze3d.platform.cursor.CursorType', 'net.minecraft.class_11875',
-        'net.minecraft.client.gui.cursor.Cursor', 'net.minecraft.src.C_411411_')
 
     /**
      * 创建限制显示范围画布
@@ -265,8 +673,8 @@ class Draw2DUtils {
      */
     static createDraw2D(region, onrender) {
         let builder = Reflection.createClassProxyBuilder(Draw2DUtils.Draw2D)
-        let on = Draw2DUtils.DrawContext.getMethodName('enableScissor', 'method_44379', 'm_280588_')
-        let off = Draw2DUtils.DrawContext.getMethodName('disableScissor', 'method_44380', 'm_280618_')
+        let on = Draw2DUtils.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
+        let off = Draw2DUtils.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
         if (on && off) {
             builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
                 let dcref = new DeobfRef(args[0])
@@ -284,29 +692,6 @@ class Draw2DUtils {
             return proxy
         }
         return Hud.createDraw2D()
-    }
-    /**
-     * 设置鼠标样式
-     * @param {keyof typeof Draw2DUtils.CursorTypes} name 样式名称
-     * @param {DrawContext|null} [drawContext=null] 画板
-     */
-    static selectCursor(name, drawContext) {
-        let shape = Draw2DUtils.CursorTypes[name]
-        if (drawContext && Draw2DUtils.CursorType) {
-            if (name == 'DEFAULT') return
-            let DEFAULT = Draw2DUtils.CursorType.get('DEFAULT', 'field_62449', 'f_412642_')
-            let createStandardCursor = Draw2DUtils.CursorType.getMethodName(
-                'createStandardCursor', 'method_74031', 'createStandard', 'm_416152_')
-            createStandardCursor && new DeobfRef(drawContext).call(
-                ['requestCursor', 'method_74037', 'setCursor', 'm_417638_'],
-                Draw2DUtils.CursorType.invoke(createStandardCursor, shape, name, DEFAULT)
-            )
-            return
-        }
-        Draw2DUtils.GLFW.invoke(
-            'glfwSetCursor',
-            Draw2DUtils.Window.get('window', 'field_5187', 'handle', 'f_85349_', 'f_413219_'),
-            Draw2DUtils.GLFW.invoke('glfwCreateStandardCursor', shape))
     }
     /**
      * 绘制气泡提示框
@@ -343,8 +728,6 @@ class Draw2DUtils {
         this.onrender = onrender
         /** @type {Draw2D} */
         this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
-        /** @type {keyof typeof Draw2DUtils.CursorTypes} 鼠标样式 */
-        this.cursor = 'DEFAULT'
         /** @type {string[]} 提示框内容 */
         this.tooltips = []
         /** @type {null|((self:Draw2DUtils) => string[])} */
@@ -360,8 +743,6 @@ class Draw2DUtils {
     /** @param {DrawContext} drawContext */
     render(drawContext) {
         this.onrender && this.onrender(this, drawContext)
-        if (this.cursor)
-            Draw2DUtils.selectCursor(this.cursor, drawContext)
         if (this.dynamicTooltips)
             this.tooltips = this.dynamicTooltips(this)
         if (this.tooltips.length > 0) {
@@ -376,11 +757,10 @@ class Draw2DUtils {
 }
 
 /** Xaero 世界地图屏幕的坐标转换封装 */
-class GuiMap {
+class WorldMap {
     /** @param {IScreen} screen */
     constructor(screen) {
-        /** @type {IScreen} */
-        this.raw = screen
+        /** @type {IScreen} */ this.raw = screen
         /** @type {Packages.org.joor.Reflect} */
         this.target = Reflection.getReflect(screen)
     }
@@ -396,8 +776,6 @@ class GuiMap {
     get mouseBlockPosY() { return this.target.get('mouseBlockPosY') }
     /** @returns {number} 鼠标所在方块 Z 坐标 */
     get mouseBlockPosZ() { return this.target.get('mouseBlockPosZ') }
-    /** @returns {type_pos2d} 鼠标所在方块坐标 */
-    get mouseBlockPos() { return PositionCommon.createPos(this.mouseBlockPosX, this.mouseBlockPosY, this.mouseBlockPosZ) }
     /** @returns {string} 鼠标所在维度 */
     get mouseBlockDim() { return this.target.get('mouseBlockDim') }
     /** @returns {number} 相机中心世界 X 坐标 */
@@ -407,44 +785,26 @@ class GuiMap {
 
     /** @returns {number} 每世界方块对应的屏幕像素 */
     scale() { return this.mapScale / Hud.getScaleFactor() }
-    /**
-     * 世界长度 → 屏幕像素
-     * @param {number} [length=1]
-     * @returns {number}
-     */
-    toSize(length = 1) { return length * this.scale() }
-    /**
-     * 世界 X → 屏幕 X
-     * @param {number} x
-     * @returns {number}
-     */
+    /** 世界长度 → 屏幕像素 @param {number} [length=1] @returns {number} */
+    toSize(length) { return (length ?? 1) * this.scale() }
+    /** 世界 X → 屏幕 X @param {number} x @returns {number} */
     toX(x) { return Math.round(this.width / 2 + this.toSize(x - this.cameraX)) }
-    /**
-     * 世界 Z → 屏幕 Y
-     * @param {number} y
-     * @returns {number}
-     */
+    /** 世界 Z → 屏幕 Y @param {number} y @returns {number} */
     toY(y) { return Math.round(this.height / 2 + this.toSize(y - this.cameraZ)) }
-    /**
-     * 世界长度 → 屏幕整数像素
-     * @param {number} [length=1]
-     * @returns {number}
-     */
-    toLength(length = 1) { return Math.round(this.toSize(length)) }
-    /** @returns {number} 鼠标屏幕 X */
+    /** 世界长度 → 屏幕整数像素 @param {number} length @returns {number} */
+    toLength(length) { return Math.round(this.toSize(length ?? 1)) }
+    /** 鼠标屏幕 X @returns {number} */
     mouseX() { return this.toX(this.mouseBlockPosX) }
-    /** @returns {number} 鼠标屏幕 Y */
+    /** 鼠标屏幕 Y @returns {number} */
     mouseY() { return this.toY(this.mouseBlockPosZ) }
-    /**
-     * 屏幕坐标是否在屏幕内
-     * @param {number} x
-     * @param {number} y
-     * @returns {boolean}
-     */
-    isInBounds(x, y) { return x > 0 && y > 0 && x < this.width && y < this.height }
 }
 
-/** 事件 */
+/** 事件
+ * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Pos2D} type_pos2d
+ * @typedef {Packages.xyz.wagyourtail.jsmacros.api.math.Vec2D} type_vec2d
+ * @typedef {{timestamp:number,interval:number,mouse:type_pos2d}} eventCache
+ * @typedef {'holding'|'pressed'|'released'} enum_keyState
+ */
 class Event {
     /** @constant @type {number} 判定属于拖拽的鼠标最短拖拽距离 */
     static DRAG_LIMIT = 1
@@ -465,11 +825,7 @@ class Event {
     static cache = {}
     /** @type {Key[]} 最近按键 */
     static latest = []
-    /**
-     * 更新缓存
-     * @param {Key} key
-     * @param {eventCache} props
-     */
+    /** 更新缓存 @param {Key} key @param {eventCache} props */
     static update(key, props) { Event.cache[key] = { ...Event.cache[key], ...props } }
 
     constructor() {
@@ -507,11 +863,7 @@ class Event {
         }
         Event.latest = [...this.keys]
     }
-    /**
-     * 获取拖拽向量
-     * @param {Key} button 拖拽按键，默认左键
-     * @returns {type_vec2d|null}
-     */
+    /** 获取拖拽向量 @param {Key} button 拖拽按键，默认左键 @returns {type_vec2d?} */
     drag(button = Event.LEFTCLICK) {
         let kv = this.keyStates[button]
         if (kv && kv.state == 'holding') {
@@ -520,19 +872,11 @@ class Event {
         }
         return null
     }
-    /**
-     * 触发单击
-     * @param {Key} button 触发按键，默认左键
-     * @returns {boolean}
-     */
+    /** 触发单击 @param {Key} button 触发按键，默认左键 @returns {boolean} */
     click(button = Event.LEFTCLICK) {
         return this.keyStates[button]?.state == 'pressed'
     }
-    /**
-     * 触发双击
-     * @param {Key} button 触发按键，默认左键
-     * @returns {boolean}
-     */
+    /** 触发双击 @param {Key} button 触发按键，默认左键 @returns {boolean} */
     dbclick(button = Event.LEFTCLICK) {
         let kv = this.keyStates[button]
         return kv?.state == 'pressed'
@@ -546,9 +890,9 @@ class Event {
 /** 事件池 */
 class EventBus {
     constructor() {
-        /** @type {any|null} JsMacros Tick 监听 id */
+        /** @type {any?} JsMacros Tick 监听 id */
         this.tick = null
-        /** @type {Record<string, {handle:handle_eventCallback, clickTimer?:number}>} tick事件池 */
+        /** @type {Record<string, {handle:(event:Event)=>void, clickTimer?:number}>} tick事件池 */
         this.events = {}
     }
     /** 生成事件监听ID @returns {string} */
@@ -578,9 +922,8 @@ class EventBus {
             }
         }))
     }
-    /**
-     * 注册持续监听器（每 tick 触发）
-     * @param {handle_eventCallback} handle 回调
+    /** 注册持续监听器
+     * @param {(event:Event)=>void} handle 回调
      * @returns {string} 监听ID
      */
     addListener(handle) {
@@ -590,7 +933,7 @@ class EventBus {
     }
     /**
      * 注册一次性定时回调（到点触发后自动移除）
-     * @param {handle_eventCallback} handle 回调
+     * @param {(event:Event)=>void} handle 回调
      * @param {number} delay 延迟毫秒
      * @returns {string} 监听ID
      */
@@ -599,39 +942,105 @@ class EventBus {
         this.events[key] = { handle: handle, clickTimer: Date.now() + delay }
         return key
     }
-    /** 移除监听 @param {string|null} key 监听ID */
-    remove(key) {
-        if (key)
-            if (key in this.events)
-                delete this.events[key]
-    }
+    /** 移除监听 @param {string?} key 监听ID */
+    remove(key) { if (key && key in this.events) delete this.events[key] }
     /** 停止Tick监听并清空所有事件 */
-    stop() {
-        if (this.tick)
-            JsMacros.off(this.tick), this.tick = null
-        this.events = {}
-    }
+    stop() { if (this.tick) JsMacros.off(this.tick), this.tick = null; this.events = {} }
 }
 
 /** 进度查询 */
 class DCAdvancement {
     constructor() { this.map = {} }
-
     loads() {
         for (let v of Player.getPlayer().getAdvancementManager().getAdvancementsForIdentifiers().keySet())
             if (v.startsWith('deceasedcraft:'))
                 this.map[v.replace(/\:.*\//, ':')] = v
     }
-
     isDone(buildid) {
         let id = this.map[`${buildid}`.split('/')[0]]
         return id && Player.getPlayer().getAdvancementManager().getAdvancementProgress(id).isDone()
     }
 }
 
-/** @typedef {{color:number, texture:CustomImage|null, largeTexture:CustomImage|null}} MarkerStateDef 标记状态定义 */
+/** @returns {ClientLevel} 主世界 ClientLevel */
+function getClientLevel() {
+    return new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_')
+}
+/** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
+function getPlayerChunkKey() {
+    const chunk = Player.getPlayer()?.getChunk()
+    return `${chunk.getChunkX()},${chunk.getChunkZ()}`
+}
+/**
+ * 扩展相邻同名建筑区块
+ * @param {number} cx 中心区块 X
+ * @param {number} cz 中心区块 Z
+ * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} centerEntry 中心区块条目
+ * @returns {string[]} 区块 key 列表（含自身）
+ */
+function expandSameBuilding(cx, cz, centerEntry) {
+    const name = centerEntry.name()
+    const visited = new Set([`${cx},${cz}`])
+    if (!name.startsWith('multi_')) return Array.from(visited)
+
+    const level = getClientLevel()
+    const queue = [[cx, cz]]
+    while (queue.length > 0) {
+        const [x, z] = queue.shift()
+
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx
+            const nz = z + dz
+            const nkey = `${nx},${nz}`
+            if (visited.has(nkey)) continue
+            let nEntry = null
+            try {
+                nEntry = ClientMapData.getPaletteEntry(level, new ChunkPos(nx, nz))
+            } catch (e) { /* 忽略 */ }
+            if (!nEntry || nEntry.name() !== name) continue
+            visited.add(nkey)
+            queue.push([nx, nz])
+        }
+    }
+    return Array.from(visited)
+}
+
+/**
+ * 标记某区块所属建筑簇为已去过
+ * @param {number} cx 中心区块 X
+ * @param {number} cz 中心区块 Z
+ * @param {string} dim 维度
+ * @param {boolean} toggle 切换模式（true=已去过则取消，false=只标记）
+ * @param {boolean} [actionBar=false] 是否用动作栏输出（自动记录用）
+ * @returns {boolean} 是否实际发生了变更
+ */
+function markChunkAt(cx, cz, dim, toggle, actionBar = false) {
+    let entry = null
+    try { entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz)) } catch (e) { }
+
+    // 无雷达建筑：地图上无标记可画，不处理
+    if (!entry || entry.buildings().size() === 0) return false
+
+    const cluster = expandSameBuilding(cx, cz, entry)
+    const allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
+    const targetState = toggle ? !allVisited : true
+    let changed = 0
+    for (const k of cluster) {
+        const has = visitedStore.getTime(dim, k) != null
+        if (targetState !== has) { visitedStore.toggle(dim, k); changed++ }
+    }
+
+    if (actionBar) {
+        if (changed > 0) Chat.actionbar(`添加记录 §a${changed} §7个区块`)
+    } else {
+        mclog(targetState ? `已标记 §a${cluster.length} §7个区块` : `已取消 §c${cluster.length} §7个区块`)
+    }
+    return changed > 0
+}
+
 /** 标记状态（附带纹理初始化） */
 const MarkerState = {
+    /** @typedef {{color:number, texture:CustomImage?, largeTexture:CustomImage?}} MarkerStateDef 标记状态定义 */
     /** 未注册 + 未去过（红） */
     UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null, largeTexture: null },
     /** 未注册 + 已去过（橙） */
@@ -640,30 +1049,22 @@ const MarkerState = {
     REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null, largeTexture: null },
     /** 已注册 + 已去过（绿） */
     REGISTERED_VISITED: { color: 0x44FF44, texture: null, largeTexture: null },
-
     /** 预创建所有标记纹理 */
-    initTextures() {
+    init() {
         for (const [name, state] of Object.entries(this)) {
             if (typeof state !== 'object' || !('color' in state)) continue
             try {
                 // 普通建筑
                 state.texture = Hud.createTexture(16, 16, `lostradar_marker_${name}`)
-                    .setGraphicsColor(0x000000)
-                    .fillRect(1, 1, 14, 14)
-                    .setGraphicsColor(state.color)
-                    .drawRoundRect(0, 0, 15, 15, 8, 8)
-                    .drawRoundRect(3, 3, 9, 9, 8, 8)
-                    .setXorMode(0x000000)
-                    .drawRect(0, 0, 15, 15)
+                    .setGraphicsColor(0x000000).fillRect(1, 1, 14, 14)
+                    .setGraphicsColor(state.color).drawRoundRect(0, 0, 15, 15, 8, 8)
+                    .drawRoundRect(3, 3, 9, 9, 8, 8).setXorMode(0x000000).drawRect(0, 0, 15, 15)
                     .update()
                 // 大型建筑
                 state.largeTexture = Hud.createTexture(16, 16, `lostradar_marker_large_${name}`)
-                    .setGraphicsColor(0x000000)
-                    .fillRect(0, 0, 15, 15)
-                    .setGraphicsColor(state.color)
-                    .drawRoundRect(0, 0, 15, 15, 16, 16)
-                    .drawRoundRect(3, 3, 9, 9, 8, 8)
-                    .drawRect(0, 0, 15, 15)
+                    .setGraphicsColor(0x000000).fillRect(0, 0, 15, 15)
+                    .setGraphicsColor(state.color).drawRoundRect(0, 0, 15, 15, 16, 16)
+                    .drawRoundRect(3, 3, 9, 9, 8, 8).drawRect(0, 0, 15, 15)
                     .update()
             } catch (e) {
                 Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
@@ -674,29 +1075,50 @@ const MarkerState = {
 
 /** 已去过区块存储 */
 class VisitedStore {
-    /** @param {string|() => string} path 存储路径 */
-    constructor(path) {
-        /** @type {string|() => string} */ this._path = path
-        /** @type {Object<string, Object<string, number>>|null} 维度 → { 区块key: 时间戳 } */
+    /**
+     * @param {string|string[]|() => string|string[]} readPaths 读取路径（按优先级）
+     * @param {string|() => string} [writePath] 写入路径；不传则用读取路径第一个
+     */
+    constructor(readPaths, writePath) {
+        /** @type {string|string[]|() => string|string[]} */ this._readPaths = readPaths
+        /** @type {string|() => string|undefined} */ this._writePath = writePath
+        /** @type {Object<string, Object<string, number>>?} 维度 → { 区块key: 时间戳 } */
         this.cache = null
     }
 
-    get path() { return typeof this._path == 'function' ? this._path() : this._path }
+    /** @returns {string[]} 读取路径列表（按优先级） */
+    get readPaths() {
+        let v = typeof this._readPaths == 'function' ? this._readPaths() : this._readPaths
+        return Array.isArray(v) ? v : [v]
+    }
 
-    /** 从本地文件加载
-     * @returns {Object<string, Object<string, number>>}
-     */
+    /** @returns {string} 写入路径 */
+    get path() {
+        let p = this._writePath ?? this._readPaths
+        return typeof p == 'function' ? p() : (Array.isArray(p) ? p[0] : p)
+    }
+
+    /** 从本地文件加载 @returns {Object<string, Object<string, number>>} */
     load() {
         if (this.cache) return this.cache
         this.cache = {}
-        try {
-            if (FS.exists(this.path)) {
-                const raw = FS.open(this.path).read()
-                if (raw && raw.length > 0) this.cache = JSON.parse(raw)
+        for (const p of this.readPaths) {
+            try {
+                if (FS.exists(p)) {
+                    const raw = FS.open(p).read()
+                    if (raw && raw.length > 0) {
+                        this.cache = JSON.parse(raw)
+                        // 读的不是写入路径 → 迁移到写入路径
+                        if (p !== this.path && Object.keys(this.cache).length > 0) {
+                            mclog(`迁移记录 §a${p} §7→ §a${this.path}`)
+                            this.save()
+                        }
+                        break
+                    }
+                }
+            } catch (e) {
+                Chat.log(`§c[雷达] 加载 ${p} 失败: ${e}`)
             }
-        } catch (e) {
-            Chat.log(`§c[雷达] 加载已去过记录失败: ${e}`)
-            this.cache = {}
         }
         return this.cache
     }
@@ -707,7 +1129,7 @@ class VisitedStore {
         try {
             const dir = this.path.substring(0, this.path.lastIndexOf('/'))
             if (!FS.exists(dir)) FS.open(dir).mkdir()
-            FS.open(this.path).write(JSON.stringify(this.cache, null, 4))
+            FS.open(this.path).write(JSON.stringify(this.cache))
         } catch (e) {
             Chat.log(`§c[雷达] 保存已去过记录失败: ${e}`)
         }
@@ -717,11 +1139,9 @@ class VisitedStore {
      * 获取某维度某区块的记录时间戳
      * @param {string} dim
      * @param {string} chunkKey "cx,cz"
-     * @returns {number|null}
+     * @returns {number?}
      */
-    getTime(dim, chunkKey) {
-        return this.load()[dim]?.[chunkKey] ?? null
-    }
+    getTime(dim, chunkKey) { return this.load()[dim]?.[chunkKey] ?? null }
 
     /**
      * 切换某维度某区块的已去过状态
@@ -732,7 +1152,6 @@ class VisitedStore {
     toggle(dim, chunkKey) {
         const cache = this.load()
         if (!cache[dim]) cache[dim] = {}
-
         let now
         if (cache[dim][chunkKey] !== undefined) {
             delete cache[dim][chunkKey]
@@ -748,35 +1167,38 @@ class VisitedStore {
 
 /** 雷达标记：管理光标周边区块的注册状态渲染 */
 class RadarMarker {
+    static utils = Java.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static minimap = Java.type('xaero.hud.minimap.BuiltInHudModules').MINIMAP
     /**
-     * @param {Draw2DUtils} d2d 渲染画布
+     * @param {XaeroOverlayManager} overlay 渲染层管理器
      * @param {DCAdvancement} adv 进度查询
      * @param {VisitedStore} store 已去过存储
      */
-    constructor(d2d, adv, store) {
-        /** @type {Draw2DUtils} */ this.d2d = d2d
+    constructor(overlay, adv, store) {
+        /** @type {XaeroOverlayManager} */ this.overlay = overlay
+        /** @type {Map<string, object>} */ this.elements = new Map()
         /** @type {DCAdvancement} */ this.adv = adv
         /** @type {VisitedStore} */ this.store = store
-        /** @type {Map<string, {cx:number,cz:number,image:any,isLarge:boolean}>} 区块key → 标记 */
-        this.markers = new Map()
+        /** @type {string?} */ this.lastSyncKey = null
+        /** @type {Draw2D} */ this.d2d = Hud.createDraw2D()
         /** @type {boolean} 渲染开关 */
         this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
+        /** @type {string} render方法名 */
+        this.render = DeobfRef.methodName(IMPORT.Renderable, 'render', 'method_25394', 'm_88315_')
     }
-
     /** 清空所有标记 */
     clear() {
-        for (const m of this.markers.values())
-            this.d2d.target.removeElement(m.image)
-        this.markers.clear()
+        for (const [k, h] of this.elements) this.overlay.removeElement(h)
+        this.elements.clear()
+        this.lastSyncKey = null
     }
-
     /**
      * 判断某区块的标记状态
      * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
      * @param {number} cx
      * @param {number} cz
      * @param {string} dim
-     * @returns {{state:MarkerStateDef, isLarge:boolean}|null} 状态 + 是否大型建筑；null=不显示
+     * @returns {{state:MarkerStateDef, isLarge:boolean}?} 状态 + 是否大型建筑；null=不显示
      */
     stateOf(entry, cx, cz, dim) {
         const buildings = Array.from(entry.buildings())
@@ -790,65 +1212,81 @@ class RadarMarker {
         else state = MarkerState.UNREGISTERED_UNVISITED
         return { state, isLarge: entry.name().startsWith('multi_') }
     }
-
     /**
-     * 重建周边标记（只在光标换区块或状态变化时调用）
+     * @param {boolean} isLarge
+     * @param {MarkerStateDef} state 已算好的状态（由 rebuild 传入）
+     * @returns {Function}
+     */
+    makeRender(isLarge, state) {
+        const self = this
+        return JavaWrapper.methodToJava((args) => {
+            try {
+                const [graphics, e, info, localX, localY, scale, isWorldMap, hovered] = args
+                const tex = isLarge ? state.largeTexture : state.texture
+                if (!tex) return false
+                const isLocked = RadarMarker.utils.getEffectiveNorthLocked(
+                    RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize() / 2, 0)
+                const half = (e.size / 2) * scale
+                const deg = isWorldMap || isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
+                const img = self.d2d.imageBuilder()
+                    .fromCustomImage(tex).alpha(isWorldMap ? 200 : 180)
+                    .pos((localX - half) | 0, (localY - half) | 0)
+                    .size(Math.max(2, (half * 2) | 0), Math.max(2, (half * 2) | 0))
+                    .rotation(deg).rotateCenter(true)
+                    .build()
+                img[self.render](graphics, 0, 0, 0)
+            } catch (err) { mclog(`[地图渲染管线] ${err}`, 12) }
+            return true
+        })
+    }
+    /**
+     * 同步 element 列表到指定中心区块周边
      * @param {number} ccx 中心区块 X
      * @param {number} ccz 中心区块 Z
      * @param {string} dim
+     * @param {boolean} force 强制重建
      */
-    rebuild(ccx, ccz, dim) {
-        this.clear()
-        if (!this.enabled) return
+    rebuild(ccx, ccz, dim, force = false) {
+        const syncKey = `${dim}|${ccx},${ccz}`
+        if (!force && syncKey === this.lastSyncKey) return
+        this.lastSyncKey = syncKey
+
+        if (!this.enabled) return this.clear()
+        if (force) {
+            for (const [k, h] of this.elements) this.overlay.removeElement(h)
+            this.elements.clear()
+        }
+        /** @type {Map<string, {entry:any, isLarge:boolean}>} */
+        const want = new Map()
         const level = getClientLevel()
         for (let dx = -MARKER_RADIUS; dx <= MARKER_RADIUS; dx++) {
             for (let dz = -MARKER_RADIUS; dz <= MARKER_RADIUS; dz++) {
                 const cx = ccx + dx
                 const cz = ccz + dz
-                let entry = null
-                try { entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz)) } catch (e) { }
+                const k = `${cx},${cz}`
+                let entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz))
                 if (!entry) continue
-
-                const info = this.stateOf(entry, cx, cz, dim)
-                if (info == null) continue
-
-                // 按建筑类型选择纹理
-                const tex = info.isLarge ? info.state.largeTexture : info.state.texture
-                if (!tex) continue
-
-                const image = this.d2d.target.imageBuilder()
-                    .fromCustomImage(tex).alpha(200)
-                    .size(info.isLarge ? 16 : 14, info.isLarge ? 16 : 14)
-                    .build()
-                this.d2d.target.reAddElement(image)
-                this.markers.set(`${cx},${cz}`, { cx, cz, image, isLarge: info.isLarge })
+                const st = this.stateOf(entry, cx, cz, dim)
+                if (!st) continue
+                want.set(k, { entry, isLarge: st.isLarge, state: st.state })
             }
         }
-    }
-
-    /**
-     * 每 tick 更新标记屏幕坐标
-     * @param {GuiMap} guimap
-     */
-    update(guimap) {
-        if (!this.enabled || this.markers.size === 0) return
-        const camX = guimap.cameraX
-        const camZ = guimap.cameraZ
-        const scale = guimap.mapScale / Hud.getScaleFactor()
-        const halfW = guimap.width / 2
-        const halfH = guimap.height / 2
-
-        for (const m of this.markers.values()) {
-            // 普通建筑 14×14 → 偏移 +1 居中；大型建筑 16×16 → 偏移 +0 铺满
-            const offset = m.isLarge ? 0 : 1
-            const base = m.isLarge ? 16 : 14
-            const x = Math.round(halfW + (m.cx * 16 + offset - camX) * scale)
-            const y = Math.round(halfH + (m.cz * 16 + offset - camZ) * scale)
-            const size = Math.max(2, Math.round(base * scale))
-            m.image.moveTo(x | 0, y | 0).setSize(size, size)
+        // 移除不在 want 的
+        for (const [k, h] of Array.from(this.elements)) {
+            if (!want.has(k)) {
+                this.overlay.removeElement(h)
+                this.elements.delete(k)
+            }
+        }
+        // 添加新增的
+        for (const [k, { entry, isLarge, state }] of want) {
+            if (this.elements.has(k)) continue
+            const [cx, cz] = k.split(',').map(Number)
+            const size = isLarge ? 16 : 14
+            const el = this.overlay.addElement(cx, cz, state.color, size, isLarge, this.makeRender(isLarge, state))
+            this.elements.set(k, el)
         }
     }
-
     /** 切换开关 */
     toggle() {
         this.enabled = !this.enabled
@@ -860,10 +1298,7 @@ class RadarMarker {
 
 /** tooltip 构建器 */
 class RadarTooltip {
-    /**
-     * @param {DCAdvancement} adv
-     * @param {VisitedStore} store
-     */
+    /** @param {DCAdvancement} adv @param {VisitedStore} store */
     constructor(adv, store) {
         /** @type {DCAdvancement} */ this.adv = adv
         /** @type {VisitedStore} */ this.store = store
@@ -872,9 +1307,7 @@ class RadarTooltip {
     /**
      * 构建带雷达数据的 tooltip
      * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
-     * @param {number} cx
-     * @param {number} cz
-     * @param {string} dim
+     * @param {number} cx @param {number} cz @param {string} dim
      * @returns {string[]}
      */
     build(entry, cx, cz, dim) {
@@ -899,11 +1332,9 @@ class RadarTooltip {
         // for (let i of buildings) lines.push(`${i}`)
         return lines
     }
-
     /**
      * 构建无雷达数据但已去过的简化 tooltip
-     * @param {number} cx
-     * @param {number} cz
+     * @param {number} cx @param {number} cz
      * @param {number} visitedTime 时间戳
      * @returns {string[]}
      */
@@ -917,48 +1348,55 @@ class RadarTooltip {
     }
 }
 
-// ==================== 全局实例 ====================
-
-const bus = new EventBus()
-const adv = new DCAdvancement()
-const visitedStore = new VisitedStore(VISITED_PATH)
-const radarTooltip = new RadarTooltip(adv, visitedStore)
-
-// 预创建所有标记纹理
-MarkerState.initTextures()
-
-// ==================== 主逻辑 ====================
-
-/** @type {any|null} OpenScreen 监听 id */
-let screen_listener = null
-/** @type {string|null} filter_listener 监听 id */
-let filter_listener = null
-/** @type {string|null} 上次记录的玩家所在区块 key（自动记录用） */
-let last_player_key = null
-
 function main() {
+    overlay = new XaeroOverlayManager().register()
+    marker = new RadarMarker(overlay, adv, visitedStore)
+
+    // 从当前玩家位置初始化一次
+    const pk = getPlayerChunkKey()
+    if (pk) {
+        const [pcx, pcz] = pk.split(',').map(Number)
+        const dim = World.getDimension()
+        adv.loads()
+        marker.rebuild(pcx, pcz, dim)
+    }
+
     screen_listener = JsMacros.on('OpenScreen', JavaWrapper.methodToJava(() => {
         const screen = Hud.getOpenScreen()
         bus.remove(filter_listener)
+        tipDraw = null
 
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
             adv.loads()
-            const guimap = new GuiMap(screen)
-            const region = { x: 0, y: 0, width: 0, height: 0 }
-            Client.runOnMainThread(JavaWrapper.methodToJava(() => {
-                region.width = guimap.width
-                region.height = guimap.height
-            }), true, 1000)
+            const guimap = new WorldMap(screen)
+            // ==================== tooltip 专用画布（独立于标记开关） ====================
+            const tipRegion = {
+                x: 0, y: 0,
+                width: guimap.width || (Hud.getWindowWidth() / Hud.getScaleFactor()),
+                height: guimap.height || (Hud.getWindowHeight() / Hud.getScaleFactor())
+            }
+            tipDraw = new Draw2DUtils(tipRegion, (self, drawContext) => {
+                try {
+                    if (!drawContext) return
+                    const cx = Math.floor(guimap.mouseBlockPosX / 16)
+                    const cz = Math.floor(guimap.mouseBlockPosZ / 16)
+                    const dim = World.getDimension()
+                    let lines = []
+                    let entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                    if (entry) {
+                        lines = radarTooltip.build(entry, cx, cz, dim)
+                    } else {
+                        const vt = visitedStore.getTime(dim, `${cx},${cz}`)
+                        if (vt != null) lines = radarTooltip.buildVisitedOnly(cx, cz, vt)
+                    }
+                    self.tooltips = lines
+                } catch (err) { mclog(`[Draw2D渲染管线] ${err}`, 12) }
+            })
+            screen.addDraw2D(tipDraw.target, 0, 0, tipRegion.width, tipRegion.height)
 
-            const radar_d2d = new Draw2DUtils(region)
-            screen.addDraw2D(radar_d2d.target, region.x, region.y, region.width, region.height)
-
-            const marker = new RadarMarker(radar_d2d, adv, visitedStore)
-
-            /** @type {string|null} 上次查询的区块 key */
+            // ==================== 按键监听 ====================
+            /** @type {string?} 上次查询的区块 key */
             let last_key = null
-            /** @type {mcjty.lostradar.data.MapPalette$PaletteEntry|null} 缓存条目 */
-            let last_entry = null
             let tick_counter = 0
 
             filter_listener = bus.addListener(event => {
@@ -966,7 +1404,6 @@ function main() {
                 if (pressedKeys.length == 0 && ++tick_counter % 3 !== 0) return
                 tick_counter = 0
 
-                radar_d2d.tooltips = []
                 // 读鼠标区块
                 const mx = guimap.mouseBlockPosX
                 const mz = guimap.mouseBlockPosZ
@@ -979,113 +1416,119 @@ function main() {
                 if (event.click(Event.KEY_H)) {
                     const on = marker.toggle()
                     mclog(on ? '标记渲染 §a开启' : '标记渲染 §c关闭')
-                    if (on) marker.rebuild(cx, cz, dim)
+                    if (on) marker.rebuild(cx, cz, dim, true)
                 }
 
-                // ---- Shift+左键：切换已去过状态，立即重建标记 ----
+                // ---- Shift+左键：切换已去过状态 ----
                 if (event.click(Event.LEFTCLICK) && pressedKeys.includes(Event.SHIFT)) {
-                    // 用当前鼠标区块的 entry 做扩展依据
-                    let centerEntry = last_entry
-                    if (!centerEntry) {
-                        centerEntry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                    if (markChunkAt(cx, cz, dim, true)) {
+                        last_key = null
+                        marker.rebuild(cx, cz, dim, true)
                     }
-
-                    if (centerEntry && centerEntry.buildings().size() > 0) {
-                        const cluster = expandSameName(cx, cz, dim, centerEntry)
-                        const allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
-                        const targetState = !allVisited
-                        for (const k of cluster) {
-                            const has = visitedStore.getTime(dim, k) != null
-                            if (targetState !== has) visitedStore.toggle(dim, k)
-                        }
-                        mclog(targetState
-                            ? `已标记 §a${cluster.length} §7个区块`
-                            : `已取消 §c${cluster.length} §7个区块`)
-                    } else {
-                        const now = visitedStore.toggle(dim, key)
-                        mclog(now ? `已标记 §a${key}` : `已取消 §c${key}`)
-                    }
-
-                    last_key = null
-                    marker.rebuild(cx, cz, dim)
-                } else if (key !== last_key) {
-                    marker.rebuild(cx, cz, dim)
                 }
 
-                marker.update(guimap)
-                // ---- 鼠标换区块才重新查询 ----
+                // ---- 鼠标换区块：重建周边 element ----
                 if (key !== last_key) {
                     last_key = key
-                    try {
-                        last_entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
-                    } catch (e) {
-                        last_entry = null
-                    }
-                }
-
-                if (last_entry) {
-                    radar_d2d.tooltips = radarTooltip.build(last_entry, cx, cz, dim)
-                } else {
-                    const visitedTime = visitedStore.getTime(dim, key)
-                    if (visitedTime != null)
-                        radar_d2d.tooltips = radarTooltip.buildVisitedOnly(cx, cz, visitedTime)
+                    marker.rebuild(cx, cz, dim)
                 }
             })
         }
     }))
-}
-
-try {
-    JsMacros.assertEvent(event, "Service")
-    setToggle(true)
-    event.stopListener = JavaWrapper.methodToJava(() => setToggle(false))
-} catch {
-    setToggle(!isToggle())
-}
-
-if (isToggle()) {
-    bus.start()
-    main()
-
-    while (isToggle()) {
-        // ---- 自动记录玩家停留过的有建筑区块（独立于地图打开状态） ----
-        let playerKey = getPlayerChunkKey()
-        if (playerKey != null && playerKey !== last_player_key) {
-            last_player_key = playerKey
+    interact_listener = JsMacros.on("InteractBlock", JavaWrapper.methodToJava((e, ctx) => {
+        try {
+            const id = `${e.block.getId()}`
+            if (!/lootr_/.test(id)) return
+            const pos = e.block.getBlockPos()
+            const cx = pos.getX() >> 4
+            const cz = pos.getZ() >> 4
             const dim = World.getDimension()
-            const parts = playerKey.split(',')
-            const pcx = parseInt(parts[0], 10)
-            const pcz = parseInt(parts[1], 10)
-
-            let entry = ClientMapData.getPaletteEntry(
-                getClientLevel(),
-                new ChunkPos(pcx, pcz)
-            )
-            if (entry) {
-                let buildings = Array.from(entry.buildings())
-                if (buildings.length > 0) {
-                    const cluster = expandSameName(pcx, pcz, dim, entry)
-                    let added = 0
-                    for (const k of cluster) {
-                        if (visitedStore.getTime(dim, k) == null) {
-                            visitedStore.toggle(dim, k)
-                            added++
-                        }
-                    }
-                    if (added > 0)
-                        Chat.actionbar(`添加记录 §a${added} §7个区块`)
-
-                    adv.loads()
-                    if (!adv.isDone(buildings[0]))
+            if (markChunkAt(cx, cz, dim, false, true)) {
+                adv.loads()
+                const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                if (entry) {
+                    const buildings = Array.from(entry.buildings())
+                    if (buildings.length > 0 && !adv.isDone(buildings[0]))
                         mclog('此建筑尚未注册')
                 }
+                marker?.rebuild(cx, cz, dim, true)
             }
-        }
-        Client.waitTick(5)
-    }
+        } catch (err) { mclog(`[开箱标记] ${err}`, 12) }
+    }))
 }
 
-bus?.stop()
-Hud?.clearDraw2Ds()
-if (screen_listener)
-    JsMacros.off(screen_listener)
+/** 清理 */
+function teardown() {
+    if (marker) { marker.clear(); marker = null }
+    if (overlay) { overlay.unregister(); overlay = null }
+    tipDraw = null
+}
+
+// ==================== 全局实例 ====================
+/** 渲染半径（区块） */
+const MARKER_RADIUS = 30
+const bus = new EventBus()
+const adv = new DCAdvancement()
+const visitedStore = new VisitedStore(
+    // 读取路径（按优先级：存档内新路径 → 带存档 ID 旧路径 → 通用旧路径）
+    () => {
+        const id = World.getWorldIdentifier()
+        const saveDir = file.getParent().replace(/config\\jsMacros.+/, '') + `saves/${id.replace('LOCAL_', '')}`
+        const paths = []
+        if (FS.exists(saveDir)) paths.push(`${saveDir}/data/lostradar_visited.json`)
+        paths.push(`data/lostradar_visited_${id}.json`)
+        paths.push(`lostradar_visited_${id}.json`)
+        paths.push(`lostradar_visited.json`)
+        return paths
+    },
+    // 写入路径（统一放存档内；存档不存在则回退）
+    () => {
+        const id = World.getWorldIdentifier()
+        const saveDir = file.getParent().replace(/config\\jsMacros.+/, '') + `saves/${id.replace('LOCAL_', '')}`
+        return FS.exists(saveDir) ? `${saveDir}/data/lostradar_visited.json` : `data/lostradar_visited_${id}.json`
+    }
+)
+const radarTooltip = new RadarTooltip(adv, visitedStore)
+// ==================== 主逻辑 ====================
+/** @type {string?} OpenScreen 监听 id */
+let screen_listener = null
+/** @type {string?} filter_listener 监听 id */
+let filter_listener = null
+/** @type {string?} InteractBlock 监听 id */
+let interact_listener = null
+/** @type {string?} 上次记录的玩家所在区块 key（自动记录用） */
+let last_player_key = null
+/** @type {XaeroOverlayManager?} */
+let overlay = null
+/** @type {RadarMarker?} */
+let marker = null
+/** @type {Draw2DUtils?} tooltip 专用画布 */
+let tipDraw = null
+
+try {
+    JsMacros.assertEvent(event, 'Service')
+    event.stopListener = JavaWrapper.methodToJava(() => { _listener.off(); toggleEnabled(false); })
+    toggleEnabled(true)
+} catch { toggleEnabled() }
+
+if (isEnabled()) {
+    bus.start()
+    MarkerState.init()
+    main()
+    _listener.step = 5
+    _listener.on(() => {
+        const playerKey = getPlayerChunkKey()
+        if (playerKey != null && playerKey !== last_player_key) {
+            last_player_key = playerKey
+            const [pcx, pcz] = playerKey.split(',').map(Number)
+            const dim = World.getDimension()
+            marker?.rebuild(pcx, pcz, dim)
+        }
+    }).offHandle = () => {
+        teardown()
+        bus?.stop()
+        Hud?.clearDraw2Ds()
+        screen_listener && JsMacros.off(screen_listener)
+        interact_listener && JsMacros.off(interact_listener)
+    }
+}

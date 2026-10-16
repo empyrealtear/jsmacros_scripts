@@ -4,7 +4,7 @@
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 在世界地图添加Draw2D画布，渲染矿脉
 // 更新内容: v1.2 改为注册自定义地图渲染层
-// 更新内容: v1.3 渲染层类构造代码复用
+// 更新内容: v1.3 渲染层类构造代码复用，提升显示效果于性能
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -234,7 +234,7 @@ const IMPORT = {
 class ModBuilder {
     static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
     static namespace = 'IeVeinOverlay'
-    static suffix = '' + `_${Date.now()}`
+    static suffix = '' //+ `_${Date.now()}`
 
     /** 共用 Element 短名 */
     static Element = `${this.namespace}_Element${this.suffix}`

@@ -1247,8 +1247,10 @@ class RadarMarker {
      * @param {number} ccz 中心区块 Z
      * @param {string} dim
      * @param {boolean} force 强制重建
+     * @param {number} radius 重建半径
      */
-    rebuild(ccx, ccz, dim, force = false) {
+    rebuild(ccx, ccz, dim, force = false, radius) {
+        adv.loads()
         const syncKey = `${dim}|${ccx},${ccz}`
         if (!force && syncKey === this.lastSyncKey) return
         this.lastSyncKey = syncKey
@@ -1261,8 +1263,9 @@ class RadarMarker {
         /** @type {Map<string, {entry:any, isLarge:boolean}>} */
         const want = new Map()
         const level = getClientLevel()
-        for (let dx = -MARKER_RADIUS; dx <= MARKER_RADIUS; dx++) {
-            for (let dz = -MARKER_RADIUS; dz <= MARKER_RADIUS; dz++) {
+        let RADIUS = radius ?? MARKER_RADIUS
+        for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+            for (let dz = -RADIUS; dz <= RADIUS; dz++) {
                 const cx = ccx + dx
                 const cz = ccz + dz
                 const k = `${cx},${cz}`
@@ -1359,7 +1362,6 @@ function main() {
     if (pk) {
         const [pcx, pcz] = pk.split(',').map(Number)
         const dim = World.getDimension()
-        adv.loads()
         marker.rebuild(pcx, pcz, dim)
     }
 
@@ -1448,14 +1450,13 @@ function main() {
             const dim = World.getDimension()
             if (mainHand == catalog || /lootr_/.test(id)) {
                 markChunkAt(cx, cz, dim, false, true)
-                adv.loads()
                 const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
                 if (entry) {
                     const buildings = Array.from(entry.buildings())
                     if (buildings.length > 0 && !adv.isDone(buildings[0]))
                         mclog('此建筑尚未注册')
                 }
-                marker?.rebuild(cx, cz, dim, true)
+                marker?.rebuild(cx, cz, dim, true, 5)
             }
         } catch (err) { mclog(`[开箱标记] ${err}`, 12) }
     }))
@@ -1526,7 +1527,7 @@ if (isEnabled()) {
             last_player_key = playerKey
             const [pcx, pcz] = playerKey.split(',').map(Number)
             const dim = World.getDimension()
-            marker?.rebuild(pcx, pcz, dim)
+            marker?.rebuild(pcx, pcz, dim, true, 5)
         }
     }).offHandle = () => {
         teardown()

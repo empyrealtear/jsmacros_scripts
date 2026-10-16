@@ -6,13 +6,25 @@
 // 更新内容: v1.2 改为注册自定义地图渲染层
 // 更新内容: v1.3 渲染层类构造代码复用
 
-const scriptName = 'XareoMap_IEVeins.ToggleScript'
-
-const mclog = (msg, color = 0x7) => Chat.log(Chat.createTextBuilder()
-    .append("[").withColor(0x5).append(scriptName).withColor(0x5)
-    .append("]").withColor(0x5).append(" " + msg).withColor(color).build())
-const isToggle = () => GlobalVars.getBoolean(scriptName)
-const setToggle = (v) => mclog(GlobalVars.putBoolean(scriptName, v) ? "启用" : "关闭")
+const scriptName = file.getName().replace(/\.(js|ts)$/, '')
+const _session = `${scriptName}:session`
+const _enabled = `${scriptName}:enabled`
+const session = GlobalVars.incrementAndGetInt(_session)
+const _listener = {
+    tick: null, counter: 0, step: 3, offHandle: null,
+    on(handle) {
+        this.tick = JsMacros.on('Tick', JavaWrapper.methodToJava(() => {
+            if (!isEnabled()) return this.off()
+            if (++this.counter % this.step != 0) return
+            handle?.()
+        }))
+        return this
+    },
+    off() { this.offHandle?.(); this.tick && JsMacros.off(this.tick); this.tick = null; return this }
+}
+const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color % 16).toString(16)}${msg}`)
+const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
+const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
 
 /** @returns {ClientLevel} */
 const clientLevel = () => new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_')
@@ -175,7 +187,49 @@ class DeobfRef {
         return name ? this.invoke(name, ...args) : null
     }
 }
-
+/** 长类名集中管理 */
+const IMPORT = {
+    // === Java 标准 ===
+    Object: 'java.lang.Object',
+    Double: 'java.lang.Double',
+    Boolean: 'java.lang.Boolean',
+    Float: 'java.lang.Float',
+    String: 'java.lang.String',
+    ArrayList: 'java.util.ArrayList',
+    Collections: 'java.util.Collections',
+    Iterator: 'java.util.Iterator',
+    Function: 'java.util.function.Function',
+    Throwable: 'java.lang.Throwable',
+    GuiGraphics: DeobfRef.className(
+        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
+        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_'),
+    BufferSource: DeobfRef.className(
+        'net.minecraft.client.renderer.MultiBufferSource$BufferSource', 'net.minecraft.class_4597$class_4598',
+        'net.minecraft.client.render.VertexConsumerProvider$Immediate', 'net.minecraft.src.C_4139_$C_4140_'),
+    Minecraft: DeobfRef.className(
+        'net.minecraft.client.Minecraft', 'net.minecraft.class_310',
+        'net.minecraft.client.MinecraftClient', 'net.minecraft.src.C_3391_'),
+    Renderable: DeobfRef.className(
+        'net.minecraft.client.gui.components.Renderable', 'net.minecraft.class_4068',
+        'net.minecraft.client.gui.Drawable', 'net.minecraft.src.C_252359_'),
+    // === Xaero 小地图 ===
+    Minimap: 'xaero.minimap.XaeroMinimap',
+    MiniLocation: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
+    MiniInfo: 'xaero.hud.minimap.element.render.MinimapElementRenderInfo',
+    MiniProvider: 'xaero.hud.minimap.element.render.MinimapElementRenderProvider',
+    MiniReader: 'xaero.hud.minimap.element.render.MinimapElementReader',
+    MiniRenderer: 'xaero.hud.minimap.element.render.MinimapElementRenderer',
+    MiniRendererHandler: 'xaero.hud.minimap.element.render.MinimapElementRendererHandler',
+    MiniTextureProvider: 'xaero.common.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
+    // === Xaero 世界地图 ===
+    WorldMap: 'xaero.map.WorldMap',
+    WorldLocation: 'xaero.map.element.render.ElementRenderLocation',
+    WorldInfo: 'xaero.map.element.render.ElementRenderInfo',
+    WorldProvider: 'xaero.map.element.render.ElementRenderProvider',
+    WorldReader: 'xaero.map.element.render.ElementReader',
+    WorldRenderer: 'xaero.map.element.render.ElementRenderer',
+    WorldTextureProvider: 'xaero.map.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
+}
 /** 动态类构建工厂（小地图 + 世界地图） */
 class ModBuilder {
     static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
@@ -197,59 +251,12 @@ class ModBuilder {
         Reader: `${this.namespace}_WorldMapReader${this.suffix}`,
         Renderer: `${this.namespace}_WorldMapRenderer${this.suffix}`,
     }
-    /** 长类名集中管理 */
-    static IMPORT = {
-        // === Java 标准 ===
-        Object: 'java.lang.Object',
-        Double: 'java.lang.Double',
-        Boolean: 'java.lang.Boolean',
-        Float: 'java.lang.Float',
-        String: 'java.lang.String',
-        ArrayList: 'java.util.ArrayList',
-        Collections: 'java.util.Collections',
-        Iterator: 'java.util.Iterator',
-        Function: 'java.util.function.Function',
-        Throwable: 'java.lang.Throwable',
-        GuiGraphics: DeobfRef.className(
-            'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
-            'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_'),
-        BufferSource: DeobfRef.className(
-            'net.minecraft.client.renderer.MultiBufferSource$BufferSource', 'net.minecraft.class_4597$class_4598',
-            'net.minecraft.client.render.VertexConsumerProvider$Immediate', 'net.minecraft.src.C_4139_$C_4140_'),
-        Minecraft: DeobfRef.className(
-            'net.minecraft.client.Minecraft', 'net.minecraft.class_310',
-            'net.minecraft.client.MinecraftClient', 'net.minecraft.src.C_3391_'),
-        Renderable: DeobfRef.className(
-            'net.minecraft.client.gui.components.Renderable', 'net.minecraft.class_4068',
-            'net.minecraft.client.gui.Drawable', 'net.minecraft.src.C_252359_'),
-        // === Xaero 小地图 ===
-        Minimap: 'xaero.minimap.XaeroMinimap',
-        MiniLocation: 'xaero.hud.minimap.element.render.MinimapElementRenderLocation',
-        MiniInfo: 'xaero.hud.minimap.element.render.MinimapElementRenderInfo',
-        MiniProvider: 'xaero.hud.minimap.element.render.MinimapElementRenderProvider',
-        MiniReader: 'xaero.hud.minimap.element.render.MinimapElementReader',
-        MiniRenderer: 'xaero.hud.minimap.element.render.MinimapElementRenderer',
-        MiniRendererHandler: 'xaero.hud.minimap.element.render.MinimapElementRendererHandler',
-        MiniFBO: 'xaero.common.minimap.render.MinimapFBORenderer',
-        MiniTextureProvider: 'xaero.common.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
-        // === Xaero 世界地图 ===
-        WorldMap: 'xaero.map.WorldMap',
-        WorldLocation: 'xaero.map.element.render.ElementRenderLocation',
-        WorldInfo: 'xaero.map.element.render.ElementRenderInfo',
-        WorldProvider: 'xaero.map.element.render.ElementRenderProvider',
-        WorldReader: 'xaero.map.element.render.ElementReader',
-        WorldRenderer: 'xaero.map.element.render.ElementRenderer',
-        WorldTextureProvider: 'xaero.map.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider',
-    }
 
     static load(name) { try { return Reflection.getClassFromClassBuilderResult(name) } catch { return null } }
     static className(name) { return this.package + name }
     /** 构建类
      * @template {string} C
-     * @param {{
-     *  name:C, extend:string, imports:Record<string,string>,
-     *  fields:string[], constructors:string[], methods:string[]
-     * }} opts 
+     * @param {{ name:C, extend:string, fields:string[], constructors:string[], methods:string[] }} opts 
      * @returns {JavaClass<C>}
      */
     static builder(opts) {
@@ -262,7 +269,7 @@ class ModBuilder {
     }
     static createElementClass() {
         const name = this.Element
-        const { String, Function } = this.IMPORT
+        const { String, Function } = IMPORT
         return this.load(name) ?? this.builder({
             name: name,
             fields: [
@@ -288,7 +295,7 @@ class ModBuilder {
     }
     static createContextClass() {
         const name = this.Context
-        const { ArrayList } = this.IMPORT
+        const { ArrayList } = IMPORT
         return this.load(name) ?? this.builder({
             name: name,
             fields: [
@@ -300,7 +307,7 @@ class ModBuilder {
         })
     }
     static createProviderClass(name, extend, location) {
-        const { Object, Iterator, Collections, ArrayList, Minecraft } = this.IMPORT
+        const { Object, Iterator, Collections, ArrayList, Minecraft } = IMPORT
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         const mcGet = DeobfRef.methodName(Minecraft, 'getInstance', 'method_1551', 'm_91087_')
@@ -316,9 +323,6 @@ class ModBuilder {
             fields: [`public ${Iterator} iterator = ${Collections}.emptyIterator();`],
             constructors: [`public ${name}() { super(); }`],
             methods: [
-                // `public void begin(${location} loc, ${Object} ctx) {
-                //     this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
-                // }`,
                 `public void begin(${location} location, ${Object} ctx) {
                     ${context} context = (${context}) ctx;
                     if (location != ${location}.OVER_MINIMAP) {
@@ -355,7 +359,7 @@ class ModBuilder {
         })
     }
     static createReaderClass(name, extend, location) {
-        const { Object, String, Minecraft } = this.IMPORT
+        const { Object, String, Minecraft } = IMPORT
         let elm = this.className(this.Element)
         let ctx = this.className(this.Context)
         return this.load(name) ?? this.builder({
@@ -385,116 +389,114 @@ class ModBuilder {
             ]
         })
     }
-    // ==================== 小地图 ====================
     static createMinimapProviderClass() {
         return this.createProviderClass(this.MINIMAP.Provider,
-            this.IMPORT.MiniProvider, this.IMPORT.MiniLocation)
+            IMPORT.MiniProvider, IMPORT.MiniLocation)
     }
     static createMinimapReaderClass() {
         return this.createReaderClass(this.MINIMAP.Reader,
-            this.IMPORT.MiniReader, this.IMPORT.MiniLocation)
+            IMPORT.MiniReader, IMPORT.MiniLocation)
     }
     static createMinimapRendererClass() {
         const name = this.MINIMAP.Renderer
-        const I = this.IMPORT
+        const {
+            MiniRenderer, MiniLocation, MiniInfo, BufferSource, MiniTextureProvider,
+            Object, GuiGraphics, Double, Boolean, Throwable
+        } = IMPORT
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         let reader = this.className(this.MINIMAP.Reader)
         let provider = this.className(this.MINIMAP.Provider)
         return this.load(name) ?? this.builder({
-            name: name, extend: I.MiniRenderer,
+            name: name, extend: MiniRenderer,
             constructors: [`public ${name}(${context} ctx) { super(new ${reader}(), new ${provider}(), ctx); }`],
             methods: [
-                `public boolean shouldRender(${I.MiniLocation} loc) {
-                    return loc == ${I.MiniLocation}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
+                `public boolean shouldRender(${MiniLocation} loc) {
+                    return loc == ${MiniLocation}.OVER_MINIMAP && ((${context}) this.context).enabled; }`,
                 `public int getOrder() { return 100; }`,
-                `public void preRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {
+                `public void preRender(${MiniInfo} info, ${BufferSource} buf, ${MiniTextureProvider} tex) {
                     ((${context}) this.context).scale = xaero.common.HudMod.INSTANCE.getMinimap().getMinimapFBORenderer().getZoom();
                 }`,
-                `public void postRender(${I.MiniInfo} info, ${I.BufferSource} buf, ${I.MiniTextureProvider} tex) {}`,
+                `public void postRender(${MiniInfo} info, ${BufferSource} buf, ${MiniTextureProvider} tex) {}`,
                 `public boolean renderElement(
-                        ${I.Object} el, boolean hovered, boolean highlighted, double depth, float screenSizeBasedScale,
-                        double localX, double localY, ${I.MiniInfo} info, ${I.GuiGraphics} graphics, ${I.BufferSource} buf) {
-                    if (el == null || graphics == null || info == null) return false;
+                        ${Object} element, boolean hovered, boolean highlighted, double depth, float screenSizeBasedScale,
+                        double localX, double localY, ${MiniInfo} info, ${GuiGraphics} graphics, ${BufferSource} buf) {
                     if (!((${context}) this.context).enabled) return false;
-                    ${element} e = (${element}) el;
-                    if (e.render == null) return false;
+                    ${element} el = (${element}) element;
+                    if (el.render == null) return false;
                     double scale = ((${context}) this.context).scale;
-                    if (!${I.Double}.isFinite(scale) || scale <= 0.0 || scale > 64.0) scale = 1.0;
                     try {
-                        ${I.Object}[] args = new ${I.Object}[7];
-                        args[0] = graphics;
-                        args[1] = e;
-                        args[2] = ${I.Double}.valueOf(localX);
-                        args[3] = ${I.Double}.valueOf(localY);
-                        args[4] = info;
-                        args[5] = ${I.Double}.valueOf(scale);
-                        args[6] = ${I.Boolean}.FALSE;
-                        ${I.Object} result = e.render.apply(args);
-                        return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
-                    } catch (${I.Throwable} t) {
+                        ${Object}[] args = new ${Object}[] {
+                            graphics, el, info,
+                            ${Double}.valueOf(localX),
+                            ${Double}.valueOf(localY),
+                            ${Double}.valueOf(scale),
+                            ${Boolean}.FALSE,
+                            ${Boolean}.valueOf(hovered)
+                        };
+                        ${Object} result = el.render.apply(args);
+                        return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
+                    } catch (${Throwable} t) {
                         return false;
                     }
                 }`,
             ]
         })
     }
+    static createWorldMapProviderClass() {
+        return this.createProviderClass(this.WORLDMAP.Provider,
+            IMPORT.WorldProvider, IMPORT.WorldLocation)
+    }
+    static createWorldMapReaderClass() {
+        return this.createReaderClass(this.WORLDMAP.Reader,
+            IMPORT.WorldReader, IMPORT.WorldLocation)
+    }
     static createWorldMapRendererClass() {
         const name = this.WORLDMAP.Renderer
-        const I = this.IMPORT
+        const {
+            WorldRenderer, WorldLocation, WorldInfo, BufferSource, WorldTextureProvider,
+            Object, Boolean, Double, GuiGraphics, Throwable
+        } = IMPORT
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         let reader = this.className(this.WORLDMAP.Reader)
         let provider = this.className(this.WORLDMAP.Provider)
         return this.load(name) ?? this.builder({
-            name: name, extend: I.WorldRenderer,
+            name: name, extend: WorldRenderer,
             constructors: [`public ${name}(${context} ctx) { super(ctx, new ${provider}(), new ${reader}()); }`],
             methods: [
-                `public boolean shouldRender(${I.WorldLocation} location, boolean shadow) { return true; }`,
+                `public boolean shouldRender(${WorldLocation} location, boolean shadow) { return true; }`,
                 `public int getOrder() { return 200; }`,
                 `public boolean shouldBeDimScaled() { return false; }`,
-                `public void preRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {
+                `public void preRender(${WorldInfo} info, ${BufferSource} buf, ${WorldTextureProvider} rp, boolean shadow) {
                     ((${context}) this.context).scale = info.scale;
                 }`,
-                `public void postRender(${I.WorldInfo} info, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp, boolean shadow) {}`,
-                `public void renderElementShadow(${I.Object} e, boolean h, float os, double px, double py,
-                    ${I.WorldInfo} info, ${I.GuiGraphics} g, ${I.BufferSource} buf, ${I.WorldTextureProvider} rp) {}`,
+                `public void postRender(${WorldInfo} info, ${BufferSource} buf, ${WorldTextureProvider} rp, boolean shadow) {}`,
+                `public void renderElementShadow(${Object} e, boolean h, float os, double px, double py,
+                    ${WorldInfo} info, ${GuiGraphics} g, ${BufferSource} buf, ${WorldTextureProvider} rp) {}`,
                 `public boolean renderElement(
-                        ${I.Object} element, boolean hovered, double optionalDepth, float optionalScale,
-                        double partialX, double partialY, ${I.WorldInfo} info, ${I.GuiGraphics} graphics,
-                        ${I.BufferSource} bufferSource, ${I.WorldTextureProvider} rendererProvider) {
+                        ${Object} element, boolean hovered, double optionalDepth, float optionalScale,
+                        double partialX, double partialY, ${WorldInfo} info, ${GuiGraphics} graphics,
+                        ${BufferSource} bufferSource, ${WorldTextureProvider} rendererProvider) {
                     if (!((${context}) this.context).enabled) return false;
                     ${element} el = (${element}) element;
-                    if (el == null || el.render == null) return false;
-                    if (info == null || graphics == null) return false;
+                    if (el.render == null) return false;
                     try {
-                        double mapScale = info.scale;
-                        if (!${I.Double}.isFinite(mapScale) || mapScale <= 0.0 || mapScale > ${I.Float}.MAX_VALUE) mapScale = 1.0;
-                        ${I.Object}[] args = new ${I.Object}[7];
-                        args[0] = graphics;
-                        args[1] = el;
-                        args[2] = ${I.Double}.valueOf(partialX);
-                        args[3] = ${I.Double}.valueOf(partialY);
-                        args[4] = info;
-                        args[5] = ${I.Double}.valueOf(mapScale);
-                        args[6] = ${I.Boolean}.TRUE;
-                        ${I.Object} result = el.render.apply(args);
-                        return (result instanceof ${I.Boolean}) && ((${I.Boolean}) result).booleanValue();
-                    } catch (${I.Throwable} t) {
-                        return false;
-                    }
+                        double scale = ((${context}) this.context).scale;
+                        ${Object}[] args = new ${Object}[] {
+                            graphics, el, info,
+                            ${Double}.valueOf(partialX),
+                            ${Double}.valueOf(partialY),
+                            ${Double}.valueOf(scale),
+                            ${Boolean}.TRUE,
+                            ${Boolean}.valueOf(hovered)
+                        };
+                        ${Object} result = el.render.apply(args);
+                        return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
+                    } catch (${Throwable} t) { return false; }
                 }`,
             ]
         })
-    }
-    // ==================== 世界地图 ====================
-    static createWorldMapProviderClass() {
-        return this.createProviderClass(this.WORLDMAP.Provider,
-            this.IMPORT.WorldProvider, this.IMPORT.WorldLocation)
-    }
-    static createWorldMapReaderClass() {
-        return this.createReaderClass(this.WORLDMAP.Reader,
-            this.IMPORT.WorldReader, this.IMPORT.WorldLocation)
     }
 }
 /** 渲染层管理器（小地图 + 世界地图） */
@@ -529,7 +531,7 @@ class XaeroOverlayManager {
     /** 注册小地图渲染层 */
     registerMinimap() {
         if (this.minimapInited) return this
-        this.minimapHandler = Java.type(ModBuilder.IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
+        this.minimapHandler = Java.type(IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
 
         ModBuilder.createMinimapProviderClass()
         ModBuilder.createMinimapReaderClass()
@@ -546,7 +548,7 @@ class XaeroOverlayManager {
     /** 注册世界地图渲染层 */
     registerWorldMap() {
         if (this.worldMapInited) return this
-        this.worldMapHandler = Java.type(ModBuilder.IMPORT.WorldMap).mapElementRenderHandler
+        this.worldMapHandler = Java.type(IMPORT.WorldMap).mapElementRenderHandler
 
         ModBuilder.createWorldMapProviderClass()
         ModBuilder.createWorldMapReaderClass()
@@ -573,7 +575,7 @@ class XaeroOverlayManager {
     unregister() {
         if (this.minimapInited) {
             try {
-                const cls = Reflection.getClass(ModBuilder.IMPORT.MiniRendererHandler)
+                const cls = Reflection.getClass(IMPORT.MiniRendererHandler)
                 const f = Reflection.getDeclaredField(cls, 'renderers')
                 f.setAccessible(true)
                 f.get(this.minimapHandler).remove(this.minimapRenderer)
@@ -611,23 +613,18 @@ class XaeroOverlayManager {
     addElement(cx, cz, color = 0x80FF0000, size = 16, render = null, extra = null) {
         if (!this.minimapInited && !this.worldMapInited) throw new Error('XaeroOverlayManager 未 register')
         const out = []
-        const mk = () => {
-            const el = Reflection.newInstance(this.ElementCls, cx | 0, cz | 0, color | 0, size | 0, render)
-            if (extra) {
-                el.radius = extra.radius | 0
-                el.depletion = extra.depletion | 0
-                el.mineral = extra.mineral ?? ""
-                el.icon = extra.icon ?? "minecraft:stone"
-            }
-            return el
+        const el = Reflection.newInstance(this.ElementCls, cx | 0, cz | 0, color | 0, size | 0, render)
+        if (extra) {
+            el.radius = extra.radius | 0
+            el.depletion = extra.depletion | 0
+            el.mineral = extra.mineral ?? ""
+            el.icon = extra.icon ?? "minecraft:stone"
         }
         if (this.minimapInited) {
-            const el = mk()
             this.minimapContext.elements.add(el)
             out.push(el)
         }
         if (this.worldMapInited) {
-            const el = mk()
             this.worldMapContext.elements.add(el)
             out.push(el)
         }
@@ -657,53 +654,82 @@ class XaeroOverlayManager {
         if (this.worldMapInited) this.worldMapContext.elements.clear()
     }
 
-    /** 小地图元素数量 @returns {number} */
-    get minimapSize() { return this.minimapInited ? this.minimapContext.elements.size() : 0 }
-
-    /** 世界地图元素数量 @returns {number} */
-    get worldMapSize() { return this.worldMapInited ? this.worldMapContext.elements.size() : 0 }
-
     setEnabled(v) {
         if (this.minimapInited) this.minimapContext.enabled = !!v
         if (this.worldMapInited) this.worldMapContext.enabled = !!v
+        return v
     }
     isEnabled() {
-        return (this.minimapInited && this.minimapContext.enabled)
-            || (this.worldMapInited && this.worldMapContext.enabled)
+        return (this.minimapInited && this.minimapContext.enabled) || (this.worldMapInited && this.worldMapContext.enabled)
     }
-    toggle() {
-        const now = !this.isEnabled()
-        this.setEnabled(now)
-        return now
-    }
+    toggle() { this.setEnabled(!this.isEnabled()) }
 
     /**
-     * 判断鼠标是否悬停在元素附近
-     * @param {number} x
-     * @param {number} y
-     * @param {number} radius 半径
-     * @param {number} scale 缩放
+     * 判断窗口是否为地图界面
+     * @param {IScreen} screen
      * @returns {boolean}
      */
-    static isHovered = (x, y, radius, scale) => {
+    static isWorldMap(screen) { return screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap' }
+    /**
+     * 转化地图坐标为屏幕坐标
+     * @param {number} x
+     * @param {number} y
+     * @param {number?} scale 缩放
+     * @returns {{x:number,y:number,scale:number}}
+     */
+    static toScreenPosition(x, y, scale) {
         let screen = Hud.getOpenScreen()
-        if (!screen) return false
+        if (!this.isWorldMap(screen)) return null
         let ref = Reflection.getReflect(screen)
-        let scale_base = Hud.getScaleFactor()
-        let width = Hud.getWindowWidth() / scale_base
-        let height = Hud.getWindowHeight() / scale_base
+        let baseScale = Hud.getScaleFactor()
+        let width = Hud.getWindowWidth() / baseScale
+        let height = Hud.getWindowHeight() / baseScale
 
         let cameraX = ref.get('cameraX')
         let cameraZ = ref.get('cameraZ')
-        let scale_total = scale / scale_base
+        let finalScale = (scale ?? ref.get('scale')) / baseScale
 
-        let ox = width / 2 + (x - cameraX) * scale_total
-        let oz = height / 2 + (y - cameraZ) * scale_total
-        const r = Math.min(Math.max(10, radius * scale_total), 20)
-        let dx = Hud.getMouseX() - ox
-        let dy = Hud.getMouseY() - oz
+        let ox = width / 2 + (x - cameraX) * finalScale
+        let oz = height / 2 + (y - cameraZ) * finalScale
+        return { x: ox, y: oz, scale: finalScale }
+    }
+    /**
+     * 判断鼠标是否悬停在坐标附近
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius 半径
+     * @param {number?} scale 缩放
+     * @returns {boolean}
+     */
+    static isHovered(x, y, radius, scale) {
+        let pos = this.toScreenPosition(x, y, scale)
+        if (!pos) return false
+        const r = Math.min(Math.max(10, radius * pos.scale), 20)
+        let dx = Hud.getMouseX() - pos.x
+        let dy = Hud.getMouseY() - pos.y
         return dx * dx + dy * dy <= r * r
     }
+    /** @type {net.minecraft.client.gui.Font} */
+    static Font = new DeobfRef(Client.getMinecraft())
+        .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
+    /** 气泡提示框内容组件
+     * @param {string[]} tooltips 
+     * @returns {JavaArray<Component>}
+     */
+    static toToolTipComponents(tooltips) {
+        let arr = JavaUtils.createArrayList()
+        for (let v of tooltips)
+            arr.add(Chat.createTextHelperFromString(v).getRaw())
+        return arr
+    }
+    /**
+     * 绘制气泡提示框
+     * @param {net.minecraft.client.gui.GuiGraphics} graphics 画板
+     * @param {int} x 坐标
+     * @param {int} y 坐标
+     * @param {JavaArray<Component>} components 格式化文本列表
+     */
+    static renderToolTip(graphics, x, y, components) { Draw2DUtils.renderToolTip(graphics, x, y, components) }
 }
 
 /** 事件 */
@@ -885,7 +911,6 @@ class Draw2DUtils {
     static DrawContext = DeobfRef.Class(
         'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
         'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
-
     /**
      * 创建限制显示范围画布
      * @param {Region} region 显示区域
@@ -937,7 +962,6 @@ class Draw2DUtils {
             }
         }
     }
-
     /**
      * @param {Region} region 区域
      * @param {(self:Draw2DUtils,drawContext:DrawContext) => void} [onrender] 渲染事件
@@ -1042,7 +1066,6 @@ class MultiSelect {
         this.buttons = []
         this.rendered = false
         this._contentY = this.y
-        this._totalWidth = 0
     }
     /**
      * @param {Record<string, string>} map
@@ -1140,7 +1163,6 @@ class MultiSelect {
 
         const totalWidth = contentWidth + this.panelPadding * 2
         const totalHeight = buttonRowHeight + this.keys.length * this.rowHeight + this.panelPadding * 2
-        this._totalWidth = totalWidth
         // 面板
         this.panel = overlay.rectBuilder()
             .color(this.panelColor).alpha(this.panelAlpha)
@@ -1285,16 +1307,7 @@ class IeMineral {
     static MineralMix = Java.type('blusunrize.immersiveengineering.api.excavator.MineralMix')
 
     /** @type {Object<string, MineralInfo & {texture:{icon:string,color:number,circle:CustomImage}, visiable:boolean}>} */
-    static MINERAL_MAP = {
-        none: {
-            texture: {
-                icon: 'minecraft:stone',
-                color: 0xFFFFFF,
-                circle: Hud.createTexture(64, 64, 'ie_mineral_canvas_none').update()
-            },
-            visiable: false
-        }
-    }
+    static MINERAL_MAP = {}
     /** @type {number} 单矿脉最大储量 */
     static MAX = this.ExcavatorHandler.mineralVeinYield
 
@@ -1313,9 +1326,9 @@ class IeMineral {
      * @param {List<RecipeHolder<R>>} recipes
      * @returns {Record<string, MineralInfo>}
      */
-    static recipeMap() {
+    static recipeMap(recipes) {
         const mineral_map = {}
-        this.recipes().forEach(v => {
+        recipes.forEach(v => {
             let name = v.getPlainName()
             let key = v.getTranslationKey()
             mineral_map[name] = {
@@ -1342,7 +1355,7 @@ class IeMineral {
 
     /** 初始化矿物配方与纹理 */
     static init() {
-        Object.entries(this.recipeMap()).forEach(([key, info], i) => {
+        Object.entries(this.recipeMap(this.recipes())).forEach(([key, info], i) => {
             let texture = this.MINERAL_MAP[key]?.texture
             if (!texture) {
                 let color = this.randomColor((i * 137.508) % 360, 0.75, 0.95)
@@ -1433,8 +1446,6 @@ let d2dBuilder = Hud.createDraw2D()
 const veinHandles = {}
 /** 每个矿物 key → 该矿物所有矿脉条目（const，内容可变） */
 const veinEntries = {}
-/** 上一帧鼠标悬停的矿脉（用于渲染 tooltip） */
-let hoveredEntry = null
 
 /** @type {string|null} OpenScreen 监听 id */
 let screen_listener = null
@@ -1449,32 +1460,65 @@ let currentMapScreen = null
 function makeVeinRender(entry) {
     const info = IeMineral.MINERAL_MAP[entry.mineral] ?? IeMineral.MINERAL_MAP.none
     const texture = info.texture
-    const renderM = DeobfRef.methodName(ModBuilder.IMPORT.Renderable, 'render', 'method_25394', 'm_88315_')
+    const render = DeobfRef.methodName(IMPORT.Renderable, 'render', 'method_25394', 'm_88315_')
+    const PoseStack = DeobfRef.className(
+        'com.mojang.blaze3d.vertex.PoseStack', 'net.minecraft.class_4587',
+        'net.minecraft.client.util.math.MatrixStack', 'net.minecraft.src.C_3181_')
+    const PoseStack_Pose = DeobfRef.className(
+        'com.mojang.blaze3d.vertex.PoseStack$Pose', 'net.minecraft.class_4587$class_4665',
+        'net.minecraft.client.util.math.MatrixStack$Entry', 'net.minecraft.src.C_3181_$C_3183_')
+    const pose = DeobfRef.methodName(IMPORT.GuiGraphics, 'pose', 'method_51448', 'getMatrices', 'm_280168_')
+    const push = DeobfRef.methodName(PoseStack, 'pushPose', 'method_22903', 'push', 'm_85836_')
+    const pop = DeobfRef.methodName(PoseStack, 'popPose', 'method_22909', 'pop', 'm_85849_')
+    const peek = DeobfRef.methodName(PoseStack, 'last', 'method_23760', 'peek', 'm_85850_')
+    const getPositionMatrix = DeobfRef.methodName(PoseStack_Pose, 'pose', 'method_23761', 'getPositionMatrix', 'm_252922_')
+    const manager = XaeroOverlayManager
 
     return JavaWrapper.methodToJava((args) => {
         try {
-            const [graphics, e, localX, localY, rinfo, scale, isWorldMap] = args
-            if (isWorldMap && scale < 0.6) return true
+            const [graphics, e, rinfo, localX, localY, scale, isWorldMap, hovered] = args
+            if (isWorldMap && scale < 1) return true
+
             const r = e.radius * scale
-            // 矿脉半径
-            const circle = d2dBuilder.imageBuilder()
-                .fromCustomImage(texture.circle)
-                .alpha(isWorldMap ? 150 : 180)
-                .pos((localX - r) | 0, (localY - r) | 0)
-                .size((r * 2) | 0, (r * 2) | 0)
-                .build()
-            circle[renderM](graphics, 0, 0, 0)
-            // 矿脉中心
             const iconSize = Math.max(24, scale)
+            if (isWorldMap) {
+                // 矿脉半径
+                const circle = d2dBuilder.imageBuilder()
+                    .fromCustomImage(texture.circle)
+                    .alpha(isWorldMap ? 150 : 180)
+                    .pos((localX - r) | 0, (localY - r) | 0)
+                    .size((r * 2) | 0, (r * 2) | 0)
+                    .build()
+                circle[render](graphics, 0, 0, 0)
+            } else {
+                const rect = d2dBuilder.rectBuilder()
+                    .alpha(isWorldMap ? 150 : 180).color(0)
+                    .pos1((localX - iconSize / 2 - 2) | 0, (localY - iconSize / 2 - 2) | 0)
+                    .size((iconSize + 4) | 0, (iconSize + 4) | 0)
+                    .build()
+                rect[render](graphics, 0, 0, 0)
+            }
+            // 矿脉中心
             const icon = d2dBuilder.itemBuilder()
-                .item(Client.getRegistryManager().getItemStack(texture.icon, '{Enchantments:[{id:-1,lvl:-1}]}'))
+                .item(Client.getRegistryManager().getItemStack(texture.icon))
                 .pos((localX - iconSize / 2) | 0, (localY - iconSize / 2) | 0)
                 .scale(iconSize / 16)
                 .build()
-            icon[renderM](graphics, 0, 0, 0)
+            icon[render](graphics, 0, 0, 0)
             // 悬停检测
-            if (isWorldMap && filter_d2d && XaeroOverlayManager.isHovered(e.x, e.z, e.radius, scale)) {
-                hoveredEntry = entry
+            if (isWorldMap) {
+                let tooltips = []
+                if (manager.isHovered(e.x, e.z, 3, scale)) {
+                    tooltips = IeMineral.detailsOf(entry)
+                }
+                if (tooltips.length > 0) {
+                    let components = manager.toToolTipComponents(tooltips)
+                    let stack = graphics[pose]()
+                    stack[push]()
+                    stack[peek]()[getPositionMatrix]().identity()
+                    manager.renderToolTip(graphics, Hud.getMouseX() | 0, Hud.getMouseY() | 0, components)
+                    stack[pop]()
+                }
             }
         } catch (err) {
             FS.open('log.txt').append(`${err}\n`)
@@ -1524,7 +1568,6 @@ function syncVeinVisibility(key) {
 function reloadVeinData() {
     for (const k of Object.keys(veinEntries)) delete veinEntries[k]
     for (const k of Object.keys(veinHandles)) delete veinHandles[k]
-    hoveredEntry = null
     const veins = IeMineral.loadVeins()
     const dim = World.getDimension()
     const veinList = veins[dim] || []
@@ -1538,7 +1581,7 @@ function reloadVeinData() {
     overlay.clearElements()
     for (const k of Object.keys(veinEntries))
         veinHandles[k] = IeMineral.MINERAL_MAP[k]?.visiable ? veinEntries[k].map(v => addVeinElement(v)) : []
-    // mclog(`已加载 ${veinList.length} 个矿脉（${Object.keys(veinEntries).length} 种矿物）`)
+    mclog(`已加载 ${veinList.length} 个矿脉（${Object.keys(veinEntries).length} 种矿物）`)
 }
 
 /**
@@ -1611,11 +1654,6 @@ function main() {
         if (!filter_panel || !filter_d2d) return
         filter_panel.tick(event)
         filter_d2d.tooltips = []
-        if (hoveredEntry) {
-            filter_d2d.tooltips = IeMineral.detailsOf(hoveredEntry)
-            event.consumed = true
-            hoveredEntry = null
-        }
     })
 }
 
@@ -1631,38 +1669,28 @@ function teardown() {
     }
     for (const k of Object.keys(veinHandles)) delete veinHandles[k]
     for (const k of Object.keys(veinEntries)) delete veinEntries[k]
-    hoveredEntry = null
     currentMapScreen = null
 }
 
 try {
     JsMacros.assertEvent(event, 'Service')
-    setToggle(true)
-    event.stopListener = JavaWrapper.methodToJava(() => {
-        setToggle(false)
-        teardown()
-    })
-} catch {
-    setToggle(!isToggle())
-}
+    event.stopListener = JavaWrapper.methodToJava(() => { _listener.off(); toggleEnabled(false); })
+    toggleEnabled(true)
+} catch { toggleEnabled() }
 
-if (isToggle()) {
+if (isEnabled()) {
     bus.start()
     IeMineral.init()
     main()
-
-    const VEIN_RELOAD_TICK_INTERVAL = 20 * 20
-    let veinReloadTickCounter = 0
+    const step = -1
+    let counter = 0
     let latest_dim = World.getDimension()
-    while (isToggle()) {
-        veinReloadTickCounter += 1
+    _listener.on(() => {
         let cur_dim = World.getDimension()
-        if (veinReloadTickCounter >= VEIN_RELOAD_TICK_INTERVAL || latest_dim != cur_dim) {
-            veinReloadTickCounter = 0
+        if ((step > 0 && ++counter >= step) || latest_dim != cur_dim) {
+            counter = 0
             reloadVeinData()
         }
         latest_dim = cur_dim
-        Client.waitTick()
-    }
-    teardown()
+    }).offHandle = () => teardown()
 }

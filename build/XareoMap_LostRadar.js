@@ -8,6 +8,7 @@
 // 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
 // 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
 // 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
+// 更新内容: v1.6.1 修复公测版和内测版小地图版本不同的锁定北方数值获取问题
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -1226,8 +1227,9 @@ class RadarMarker {
                 const tex = isLarge ? state.largeTexture : state.texture
                 if (!tex) return false
                 let mapSize = RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize()
-                const isLocked = (RadarMarker.settings?.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
-                    || (RadarMarker.utils?.getEffectiveNorthLocked(mapSize/ 2, 0))
+                const isLocked = (RadarMarker.utils?.getEffectiveNorthLocked(mapSize / 2, 0))
+                    || (RadarMarker.settings?.getLockNorth &&
+                        RadarMarker.settings.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
                 const half = (e.size / 2) * scale
                 const deg = isWorldMap ? 0 : isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
                 const img = self.d2d.imageBuilder()

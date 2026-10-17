@@ -1,14 +1,15 @@
 // 脚本名称: 失落城市雷达数据
-// 功能介绍: 在Xaero世界地图上显示失落城市雷达数据（鼠标悬停区块显示tooltip，Shift+左键标记已去过，自动记录有建筑的区块，H键切换标记渲染）
-// 依赖模组: jsmacros、Xaero地图(Xaero's World Map、MiniMap)、失落城市雷达(LostRadar)
+// 功能介绍: 在Xaero世界地图上显示失落城市雷达数据
+// 依赖模组: jsmacros、Xaero地图(Xaero's World Map、MiniMap)、失落城市雷达(LostRadar)、ALI高级战利品信息（可选）
+// 按键绑定：地图界面（H键 显示/隐藏标记、Shift+左键 添加/取消标记、Alt+左键 跳转到ALI高级战利品信息）
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 自动记录停留过的建筑区块，允许添加为常驻服务脚本，修复未正确获取维度名
 // 更新内容: v1.2 根据成就完成记录显示建筑是否已收集
-// 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，按存档名隔离存储数据，若已使用之前版本需要手动改为新文件名
+// 更新内容: v1.3 H键切换标记显示，高亮显示出建筑标记状态，按存档名隔离存储数据
 // 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
 // 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
 // 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
-// 更新内容: v1.6.1 修复公测版和内测版小地图版本不同的锁定北方数值获取问题
+// 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示功能
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -30,10 +31,6 @@ const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color 
 const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
 const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
 
-/** @type {JavaClass<ChunkPos>} */
-const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
-/** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
-const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
 
 /** 反射工具 @template T */
 class DeobfRef {
@@ -193,6 +190,19 @@ class DeobfRef {
         return name ? this.invoke(name, ...args) : null
     }
 }
+
+/** @type {JavaClass<ChunkPos>} */
+const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
+/** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
+const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
+/** @type {net.minecraft.util.Identifier} */
+const Identifier = DeobfRef.Type(
+    'net.minecraft.resources.ResourceLocation', 'net.minecraft.class_2960',
+    'net.minecraft.util.Identifier', 'net.minecraft.src.C_5265_')
+/** @type {Java.type<ItemStackHelper>} */
+const ItemStackHelper = Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
+
+
 /** 长类名集中管理 */
 const IMPORT = {
     // === Java 标准 ===
@@ -654,8 +664,8 @@ class XaeroOverlayManager {
  * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
  */
 class Draw2DUtils {
-    /** @type {net.minecraft.client.font.TextRenderer} */
-    static TextRenderer = new DeobfRef(Client.getMinecraft())
+    /** @type {net.minecraft.client.gui.Font} */
+    static Font = new DeobfRef(Client.getMinecraft())
         .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
     /** @type {JavaClass<Draw2D>} */
     static Draw2D = Reflection.getClass(
@@ -666,6 +676,23 @@ class Draw2DUtils {
         'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
         'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
 
+    /** 获取文本宽度
+     * @param {string} text
+     * @param {number} [scale=1]
+     * @returns {int}
+     */
+    static getWidth(text, scale = 1) {
+        let names = ['width', 'method_1727', 'getWidth', 'm_92895_']
+        let length = null
+        try { length = this.Font?.call(names, text) } catch {
+            try {
+                Client.runOnMainThread(JavaWrapper.methodToJava(() => {
+                    length = this.Font?.call(names, text) ?? length
+                }), true, 1000)
+            } catch { }
+        }
+        return Math.ceil((length ?? text.length * 6) * scale)
+    }
     /**
      * 创建限制显示范围画布
      * @param {Region} region 显示区域
@@ -673,9 +700,9 @@ class Draw2DUtils {
      * @returns {Draw2D} 裁剪后的 Draw2D
      */
     static createDraw2D(region, onrender) {
-        let builder = Reflection.createClassProxyBuilder(Draw2DUtils.Draw2D)
-        let on = Draw2DUtils.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
-        let off = Draw2DUtils.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
+        let builder = Reflection.createClassProxyBuilder(this.Draw2D)
+        let on = this.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
+        let off = this.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
         if (on && off) {
             builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
                 let dcref = new DeobfRef(args[0])
@@ -696,25 +723,36 @@ class Draw2DUtils {
     }
     /**
      * 绘制气泡提示框
-     * @param {DrawContext} drawContext 画板
+     * @param {DrawContext} graphics 画板
      * @param {int} x 坐标
      * @param {int} y 坐标
      * @param {JavaArray<Component>} components 格式化文本列表
+     * @param {number} scale
      */
-    static renderToolTip(drawContext, x, y, components) {
-        if (drawContext) {
+    static renderToolTip(graphics, x, y, components, scale) {
+        if (graphics) {
             let method = [
                 'setComponentTooltipForNextFrame', 'renderComponentTooltip',
                 'method_51434', 'drawTooltip', 'm_403688_', 'm_280666_'
             ]
-            let dcref = new DeobfRef(drawContext)
+            let dcref = new DeobfRef(graphics)
+            let stack = new DeobfRef(dcref.call(['pose', 'method_51448', 'getMatrices', 'm_280168_']))
+            stack.call(['pushPose', 'method_22903', 'push', 'm_85836_'])
+            let last = stack.call(['last', 'method_23760', 'peek', 'm_85850_'])
+            let getPositionMatrix = DeobfRef.methodName(DeobfRef.className(
+                'com.mojang.blaze3d.vertex.PoseStack$Pose', 'net.minecraft.class_4587$class_4665',
+                'net.minecraft.client.util.math.MatrixStack$Entry', 'net.minecraft.src.C_3181_$C_3183_'
+            ), 'pose', 'method_23761', 'getPositionMatrix', 'm_252922_')
+            new DeobfRef(last).invoke(getPositionMatrix).identity()
+            stack.call(['scale', 'method_22905', 'm_85841_'], scale ?? 1, scale ?? 1, 1)
             try {
-                dcref.call(method, Draw2DUtils.TextRenderer, components, Math.round(x), Math.round(y))
+                dcref.call(method, this.Font, components, Math.round(x), Math.round(y))
                 dcref.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
             } catch {
-                dcref.call(method, Draw2DUtils.TextRenderer, components, Math.round(x), Math.round(y),
+                dcref.call(method, this.Font, components, Math.round(x), Math.round(y),
                     Player.getPlayer().getMainHand().getRaw())
             }
+            stack.call(['popPose', 'method_22909', 'pop', 'm_85849_'])
         }
     }
 
@@ -729,15 +767,19 @@ class Draw2DUtils {
         this.onrender = onrender
         /** @type {Draw2D} */
         this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
-        /** @type {string[]} 提示框内容 */
+        /** @type {{x:number,y:number,scale:number,tips:string[]}[]} 提示框内容 */
         this.tooltips = []
-        /** @type {null|((self:Draw2DUtils) => string[])} */
+        /** @type {null|((self:Draw2DUtils) => {x:number,y:number,scale:number,tips:string[]}[])} */
         this.dynamicTooltips = null
+
     }
-    /** @returns {JavaArray<Component>} 气泡提示框内容组件 */
-    getToolTipComponents() {
+    /** 气泡提示框内容组件
+     * @param {string[]} tooltips
+     * @returns {JavaArray<Component>}
+     */
+    asComponents(tooltips) {
         let arr = JavaUtils.createArrayList()
-        for (let v of this.tooltips)
+        for (let v of tooltips)
             arr.add(Chat.createTextHelperFromString(v).getRaw())
         return arr
     }
@@ -747,8 +789,13 @@ class Draw2DUtils {
         if (this.dynamicTooltips)
             this.tooltips = this.dynamicTooltips(this)
         if (this.tooltips.length > 0) {
-            let components = this.getToolTipComponents()
-            Draw2DUtils.renderToolTip(drawContext, Hud.getMouseX(), Hud.getMouseY(), components)
+            for (let i of this.tooltips) {
+                if (i.tips.length == 0) continue
+                let x = i.x ?? Hud.getMouseX(), y = i.y ?? Hud.getMouseY()
+                let components = this.asComponents(i.tips)
+                let scale = i.scale ?? 1
+                Draw2DUtils.renderToolTip(drawContext, x / scale, y / scale, components, scale)
+            }
         }
     }
     /** @param {string[]|(self:Draw2DUtils) => string[]} v */
@@ -819,6 +866,8 @@ class Event {
     static MIDCLICK = 'key.mouse.middle'
     /** @constant @type {Key} 左 Shift */
     static SHIFT = 'key.keyboard.left.shift'
+    /** @constant @type {Key} 左 Alt */
+    static ALT = 'key.keyboard.left.alt'
     /** @constant @type {Key} H 键 */
     static KEY_H = 'key.keyboard.h'
 
@@ -1336,7 +1385,10 @@ class RadarTooltip {
         lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
 
         lines.push(visited ? `§8Shift+左键 取消标记` : `§8Shift+左键 标记去过`)
+        if (JeiApi.inited)
+            lines.push(`§8Alt+左键    ${JeiApi.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`)
         // for (let i of buildings) lines.push(`${i}`)
+
         return lines
     }
     /**
@@ -1352,6 +1404,124 @@ class RadarTooltip {
             `§7区块: §f${cx}, ${cz}`,
             `§8Shift+左键 取消标记`,
         ]
+    }
+}
+
+const JeiApi = {
+    path: 'data/ali_chest_loot.json',
+    recipes: [],
+    localRecipes: {},
+    inited: false,
+    init() {
+        this.jei = DeobfRef.Type('mezz.jei.common.Internal')?.getJeiRuntime()
+        this.typeId = new Identifier('ali', 'chest_loot')
+        if (!this.jei) return // 未安装JEI
+        this.recipeManager = this.jei.getRecipeManager()
+        this.recipesGui = this.jei.getRecipesGui()
+        this.recipeType = this.recipeManager.getRecipeType(this.typeId).orElse(null)
+        if (this.recipeType) {
+            this.category = this.recipeManager.getRecipeCategory(this.recipeType)
+            this.recipes = Array.from(this.recipeManager.createRecipeLookup(this.recipeType).get().toList())
+            this.recipes = []
+            this.localRecipes = this.load()
+            this.save()
+        } else {
+            this.localRecipes = this.load()
+        }
+        if (this.recipes.length + Object.keys(this.localRecipes).length == 0) return
+        this.inited = true
+    },
+    show(filter_handle) {
+        if (!this.inited || !filter_handle) return
+        if (this.recipes.length > 0) {
+            let results = this.recipes.filter(v => filter_handle(`${v.type().id()}`))
+            if (results.length == 0) return
+            Client.runOnMainThread(JavaWrapper.methodToJava(() => {
+                this.recipesGui.showRecipes(this.category, results, JavaUtils.createArrayList())
+            }), true, 1000)
+            return true
+        }
+        return false
+    },
+    collect(n, out) {
+        if (!n) return
+        if (/ItemNode|ItemStackNode/.test(Reflection.getClassName(n))) {
+            let bounds = n.getCount().bounds()
+            for (let v of n.getItems()) {
+                let it = new ItemStackHelper(v)
+                let enchants = Array.from(it.getEnchantments())
+                out.push({
+                    id: it.getItemId(),
+                    name: it.getName().getString() + (enchants.length == 0 ? '' :
+                        `[${enchants.map(v => v.getLevelName(v.getLevel())).join(', ')}]`),
+                    chance: n.getChance(),
+                    min: bounds.lo(), max: bounds.hi()
+                })
+            }
+        } else if (n.nodes)
+            for (const c of n.nodes())
+                this.collect(c, out)
+    },
+    simplify(entry) {
+        let map = new Map(), items = {}
+        for (let pool of entry.nodes ? entry.nodes() : []) {
+            if (!/LootPoolNode/.test(Reflection.getClassName(pool))) continue
+            let poolMap = new Map(), arr = []
+            this.collect(pool, arr)
+            for (let it of arr) {
+                let c = poolMap.get(it.id)
+                if (!c) poolMap.set(it.id, { ...it })
+                else {
+                    c.min = Math.min(c.min, it.min), c.max = Math.max(c.max, it.max)
+                    if (c.chance == null) c.chance = it.chance
+                }
+            }
+            for (let it of poolMap.values()) {
+                let c = map.get(it.id)
+                if (!c) map.set(it.id, { name: it.name, chances: [it.chance], min: it.min, max: it.max })
+                else {
+                    c.chances.push(it.chance)
+                    c.min = Math.min(c.min, it.min)
+                    c.max = Math.max(c.max, it.max)
+                    if (!c.name && it.name)
+                        c.name = it.name
+                }
+            }
+        }
+        for (let [id, it] of map) {
+            let u = [...new Set(it.chances.filter(c => c != null))].sort((a, b) => a - b)
+            items[id] = {
+                name: it.name,
+                chance: u.length === 0 ? null : u.length === 1 ? u[0] : u,
+                count: it.min === it.max ? it.min : `${it.min}-${it.max}`
+            }
+        }
+        return items
+    },
+    load() { return FS.exists(this.path) ? JSON.parse(FS.open(this.path).read()) : [] },
+    save() {
+        if (this.recipes.length == 0 || FS.exists(this.path)) return
+        let result = {}
+        for (let i = 0; i < this.recipes.length; i++) {
+            let r = this.recipes[i].type(), id = `${r.id()}`
+            if (!/deceasedcraft:/.test(id)) continue
+            let name = Chat.createTextHelperFromTranslationKey(id.replace('deceasedcraft:', 'ali/loot_table/')).getString()
+            let outputs = {}
+            for (let v of r.outputs()) {
+                let it = new ItemStackHelper(v)
+                outputs[it.getItemId()] = it.getName().getString()
+            }
+            let items = this.simplify(r.entry())
+            for (let k in items)
+                if (!items[k].name)
+                    items[k].name = outputs[k] || null
+
+            result[id] = { name, items }
+        }
+        if (Object.keys(result).length > 0) {
+            FS.open(this.path).write(JSON.stringify(result, null, 4))
+            Chat.actionbar(`已保存${Object.keys(result).length}条配方到${this.path}`)
+        }
     }
 }
 
@@ -1371,7 +1541,6 @@ function main() {
         const screen = Hud.getOpenScreen()
         bus.remove(filter_listener)
         tipDraw = null
-
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
             adv.loads()
             const guimap = new WorldMap(screen)
@@ -1381,6 +1550,7 @@ function main() {
                 width: guimap.width || (Hud.getWindowWidth() / Hud.getScaleFactor()),
                 height: guimap.height || (Hud.getWindowHeight() / Hud.getScaleFactor())
             }
+
             tipDraw = new Draw2DUtils(tipRegion, (self, drawContext) => {
                 try {
                     if (!drawContext) return
@@ -1395,11 +1565,10 @@ function main() {
                         const vt = visitedStore.getTime(dim, `${cx},${cz}`)
                         if (vt != null) lines = radarTooltip.buildVisitedOnly(cx, cz, vt)
                     }
-                    self.tooltips = lines
+                    self.tooltips = [{ tips: lines }, { x: 20, y: 30, tips: lootr.current() }]
                 } catch (err) { mclog(`[Draw2D渲染管线] ${err}`, 12) }
             })
             screen.addDraw2D(tipDraw.target, 0, 0, tipRegion.width, tipRegion.height)
-
             // ==================== 按键监听 ====================
             /** @type {string?} 上次查询的区块 key */
             let last_key = null
@@ -1425,12 +1594,62 @@ function main() {
                     if (on) marker.rebuild(cx, cz, dim, true)
                 }
 
-                // ---- Shift+左键：切换已去过状态 ----
-                if (event.click(Event.LEFTCLICK) && pressedKeys.includes(Event.SHIFT)) {
-                    if (markChunkAt(cx, cz, dim, true)) {
-                        last_key = null
-                        marker.rebuild(cx, cz, dim, true)
+                if (event.click(Event.LEFTCLICK)) {
+                    if (pressedKeys.includes(Event.ALT)) {
+                        // ---- Alt+左键：切换到战利品页面 ----
+                        const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                        if (entry) {
+                            const buildings = Array.from(entry.buildings())
+                            if (buildings.length > 0) {
+                                let ids = buildings.map(x => `${x}`.replace(entry.name(), 'chests') + '/')
+                                if (!JeiApi.show((v) => ids.some(x => `${v}`.startsWith(x)))
+                                    && Object.keys(JeiApi.localRecipes).length > 0) {
+                                    /** @type {Record<string,Set<string>>} */
+                                    let map = {}
+                                    for (let k of Object.keys(JeiApi.localRecipes))
+                                        if (ids.some(x => `${k}`.startsWith(x))) {
+                                            let v = JeiApi.localRecipes[k]
+                                            for (let ik of Object.keys(v.items)) {
+                                                let iv = v.items[ik]
+                                                let [namespace, path] = ik.split(':')
+                                                map[namespace] ??= new Set()
+                                                map[namespace].add(`    §8- §f${iv.name}§f: ${iv.count} (${[iv.chance].flat(2).map(z => (z * 100).toFixed(2) + '%').join(',')})`)
+                                            }
+                                        }
+                                    let trans = Chat.createTextHelperFromTranslationKey(entry.translatableKey()).getString().trim()
+                                    lootr.reset()
+                                    lootr.title = `§6战利品信息: ${trans}`
+                                    const priorityKeys = ['nameless_trinkets', 'artifacts', 'tacz', 'legendarysurvivaloverhaul', 'secruitycraft']
+                                    lootr.list = Object.entries(map)
+                                        .sort((a, b) => {
+                                            const keyA = a[0], keyB = b[0];
+                                            const isPriorityA = priorityKeys.includes(keyA)
+                                            const isPriorityB = priorityKeys.includes(keyB)
+                                            // 如果 A 是优先，B 不是，A 排前面（返回 -1）
+                                            if (isPriorityA && !isPriorityB) return -1
+                                            // 如果 B 是优先，A 不是，B 排前面（返回 1）
+                                            if (!isPriorityA && isPriorityB) return 1
+                                            // 如果都不是优先，或者都是优先，则按照字母序排
+                                            return keyA.localeCompare(keyB)
+                                        })
+                                        .map(([k, v]) => [`§7[§6${k}§7]:`, ...Array.from(v).sort()])
+                                        .flat()
+                                }
+                            }
+                        }
+                    } else if (pressedKeys.includes(Event.SHIFT)) {
+                        // ---- Shift+左键：切换已去过状态 ----
+                        if (markChunkAt(cx, cz, dim, true)) {
+                            last_key = null
+                            marker.rebuild(cx, cz, dim, true)
+                        }
+                    } else {
+                        lootr.reset()
                     }
+                } else if (event.click('key.keyboard.a')) {
+                    lootr.prevpage()
+                } else if (event.click('key.keyboard.d')) {
+                    lootr.nextpage()
                 }
 
                 // ---- 鼠标换区块：重建周边 element ----
@@ -1511,6 +1730,24 @@ let overlay = null
 let marker = null
 /** @type {Draw2DUtils?} tooltip 专用画布 */
 let tipDraw = null
+const lootr = {
+    title: null, list: [], page: 1, step: 28,
+    reset() { this.title = null, this.list = [], this.page = 1 },
+    total() { return Math.ceil(this.list.length / this.step) },
+    prevpage() { this.page = Math.max(1, this.page - 1) },
+    nextpage() { this.page = Math.min(this.total(), this.page + 1) },
+    current() {
+        let total = this.total()
+        let res
+        if (total > 1) {
+            let start = (this.page - 1) * this.step
+            res = this.list.slice(start, start + this.step)
+            res.push(` §8← §7[A] 第 ${this.page} 页 / 共 ${total} 页 [D] →§8 `)
+        } else res = [...this.list]
+        res.unshift(this.title)
+        return res
+    }
+}
 
 try {
     JsMacros.assertEvent(event, 'Service')
@@ -1521,6 +1758,7 @@ try {
 if (isEnabled()) {
     bus.start()
     MarkerState.init()
+    JeiApi.init()
     main()
     _listener.step = 5
     _listener.on(() => {

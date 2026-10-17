@@ -9,7 +9,7 @@
 // 更新内容: v1.4 大型建筑按 buildings 数量扩展相邻同名区块，手动标注和自动记录统一处理
 // 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
 // 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
-// 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示功能
+// 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示问题
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -1385,8 +1385,8 @@ class RadarTooltip {
         lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
 
         lines.push(visited ? `§8Shift+左键 取消标记` : `§8Shift+左键 标记去过`)
-        if (JeiApi.inited)
-            lines.push(`§8Alt+左键    ${JeiApi.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`)
+        if (JEIAPI.inited)
+            lines.push(`§8Alt+左键    ${JEIAPI.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`)
         // for (let i of buildings) lines.push(`${i}`)
 
         return lines
@@ -1407,7 +1407,7 @@ class RadarTooltip {
     }
 }
 
-const JeiApi = {
+const JEIAPI = {
     path: 'data/ali_chest_loot.json',
     recipes: [],
     localRecipes: {},
@@ -1422,8 +1422,7 @@ const JeiApi = {
         if (this.recipeType) {
             this.category = this.recipeManager.getRecipeCategory(this.recipeType)
             this.recipes = Array.from(this.recipeManager.createRecipeLookup(this.recipeType).get().toList())
-            this.recipes = []
-            this.localRecipes = this.load()
+            // this.recipes = []; this.localRecipes = this.load() // 模拟服务器
             this.save()
         } else {
             this.localRecipes = this.load()
@@ -1602,13 +1601,13 @@ function main() {
                             const buildings = Array.from(entry.buildings())
                             if (buildings.length > 0) {
                                 let ids = buildings.map(x => `${x}`.replace(entry.name(), 'chests') + '/')
-                                if (!JeiApi.show((v) => ids.some(x => `${v}`.startsWith(x)))
-                                    && Object.keys(JeiApi.localRecipes).length > 0) {
+                                if (!JEIAPI.show((v) => ids.some(x => `${v}`.startsWith(x)))
+                                    && Object.keys(JEIAPI.localRecipes).length > 0) {
                                     /** @type {Record<string,Set<string>>} */
                                     let map = {}
-                                    for (let k of Object.keys(JeiApi.localRecipes))
+                                    for (let k of Object.keys(JEIAPI.localRecipes))
                                         if (ids.some(x => `${k}`.startsWith(x))) {
-                                            let v = JeiApi.localRecipes[k]
+                                            let v = JEIAPI.localRecipes[k]
                                             for (let ik of Object.keys(v.items)) {
                                                 let iv = v.items[ik]
                                                 let [namespace, path] = ik.split(':')
@@ -1758,7 +1757,7 @@ try {
 if (isEnabled()) {
     bus.start()
     MarkerState.init()
-    JeiApi.init()
+    JEIAPI.init()
     main()
     _listener.step = 5
     _listener.on(() => {

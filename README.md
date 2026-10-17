@@ -30,7 +30,9 @@
 - Xaero地图自定义渲染: [XaeroMapOverlay.js](./lib/XaeroMapOverlay.js)
 
 ### 应用类
-- 机动柴油动力油田扫描: [CreateOilScaner.js](./build/CreateOilScaner.js)、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/page/柴油动力油田预览.html)
+- 机动柴油动力油田扫描: [XareoMap_CreateOilScaner.js
+](./build/XareoMap_CreateOilScaner.js
+)、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/page/柴油动力油田预览.html)
 - 沉浸工程矿脉预览: [XareoMap_IEVeins.js](./build/XareoMap_IEVeins.js)、[沉浸工程矿脉预览(网页版)](https://empyrealtear.github.io/jsmacros_scripts/page/沉浸工程矿脉预览.html)
 - 失落城市地图雷达: [XareoMap_LostRadar.js](./build/XareoMap_LostRadar.js)
 - Baritone路径规划渲染: [BaritoneRender.js](./build/BaritoneRender.js)

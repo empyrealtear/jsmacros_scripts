@@ -794,8 +794,11 @@ class EventBus {
                 try {
                     if (!rec.clickTimer)
                         rec.handle(event)
-                    else if (rec.clickTimer <= Date.now())
-                        rec.handle(event), this.remove(key)
+                    else if (rec.clickTimer <= Date.now()) {
+                        let handle = rec.handle
+                        this.remove(key)
+                        handle(event)
+                    }
                 } catch (e) {
                     // Chat.log(`[EventBus] handler 异常: ${e}`)
                 }

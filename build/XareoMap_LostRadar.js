@@ -1045,7 +1045,7 @@ const JEIAPI = {
         if (this.recipeType) {
             this.category = this.recipeManager.getRecipeCategory(this.recipeType)
             this.recipes = Array.from(this.recipeManager.createRecipeLookup(this.recipeType).get().toList())
-            // this.recipes = []; this.localRecipes = this.load() // 模拟服务器
+            this.recipes = []; this.localRecipes = this.load() // 模拟服务器
             this.save()
         } else {
             this.localRecipes = this.load()
@@ -1145,11 +1145,11 @@ const JEIAPI = {
         }
     },
     priorityKeys: ['nameless_trinkets', 'artifacts', 'tacz', 'legendarysurvivaloverhaul', 'secruitycraft'],
-    pretty() {
+    pretty(callback) {
         /** @type {Record<string,Set<string>>} */
         let map = {}
         for (let k of Object.keys(this.localRecipes))
-            if (ids.some(x => `${k}`.startsWith(x))) {
+            if (callback && callback(k)) {
                 let v = this.localRecipes[k]
                 for (let ik of Object.keys(v.items)) {
                     let iv = v.items[ik]
@@ -1567,11 +1567,11 @@ function main() {
                             let buildings = Array.from(entry.buildings())
                             if (buildings.length > 0) {
                                 let ids = buildings.map(x => `${x}`.replace(entry.name(), 'chests') + '/')
-                                if (!JEIAPI.show((v) => ids.some(x => `${v}`.startsWith(x)))
-                                    && Object.keys(JEIAPI.localRecipes).length > 0) {
+                                let callback = (v) => ids.some(x => `${v}`.startsWith(x))
+                                if (!JEIAPI.show(callback) && Object.keys(JEIAPI.localRecipes).length > 0) {
                                     LootrPanel.reset()
                                     LootrPanel.title = `§6战利品信息: ${utils.transkey(entry.translatableKey())}`
-                                    LootrPanel.list = JEIAPI.pretty()
+                                    LootrPanel.list = JEIAPI.pretty(callback)
                                 }
                             }
                         }

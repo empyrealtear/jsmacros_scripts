@@ -10,6 +10,7 @@
 // 更新内容: v1.5 大型建筑和普通建筑用不同纹理高亮
 // 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
 // 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示问题
+// 更新内容: v1.8 添加悬浮窗区域显示，纹理添加建筑级别
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -30,7 +31,7 @@ const _listener = {
 const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color % 16).toString(16)}${msg}`)
 const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
 const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
-
+const _dev = true
 
 /** 反射工具 @template T */
 class DeobfRef {
@@ -69,14 +70,13 @@ class DeobfRef {
                 if (m.getName() === n) return n
         return null
     }
-
     /**
      * 按顺序尝试加载类，返回第一个成功的
      * @template {string} C
      * @param {C[]} class_names
      * @returns {GetJava.Type$Graal<C>?}
      */
-    static Type(...class_names) {
+    static type(...class_names) {
         for (let item of class_names)
             try { return Java.type(item) } catch { }
         return null
@@ -87,8 +87,8 @@ class DeobfRef {
      * @param {C[]} class_names
      * @returns {DeobfRef<C>?}
      */
-    static Class(...class_names) {
-        let type = this.Type(...class_names)
+    static class(...class_names) {
+        let type = this.type(...class_names)
         return type ? new this(type) : null
     }
 
@@ -105,13 +105,13 @@ class DeobfRef {
     /** @returns {GetJava.Type$Graal<T>} Graal 版 Java 类 */
     get type() { return Java.type(this.classname) }
     /** @returns {JavaClass<T>} 反射版 Java 类 */
-    get class() { return Reflection.getClass(this.classname) }
+    get class() { try { return Reflection.getClass(this.classname) } catch { return null } }
     /** @returns {string[]} 所有字段名（缓存） */
-    get fields() { return this._fields ??= this.class.getDeclaredFields().map(v => v.getName()) }
+    get fields() { return this._fields ??= this.class?.getDeclaredFields().map(v => v.getName()) ?? [] }
     /** @returns {string[]} 所有方法名（缓存） */
-    get methods() { return this._methods ??= this.class.getDeclaredMethods().map(v => v.getName()) }
+    get methods() { return this._methods ??= this.class?.getDeclaredMethods().map(v => v.getName()) ?? [] }
     /** @returns {JavaClass<any>} 父类 */
-    get parent() { return this.class.getSuperclass() }
+    get parent() { return this.class?.getSuperclass() }
 
     /**
      * 获取第一个存在的字段名
@@ -119,9 +119,8 @@ class DeobfRef {
      * @returns {string?}
      */
     fieldName(...names) {
-        let fields = this.fields
         for (let name of names)
-            if (fields.includes(name)) return name
+            if (this.fields.includes(name)) return name
         return null
     }
     /**
@@ -146,10 +145,7 @@ class DeobfRef {
         let name = this.fieldName(...names)
         if (name)
             try { return this.reflect.set(name, value).get() }
-            catch {
-                this.target[name] = value
-                return this.target[name]
-            }
+            catch { return this.target[name] = value, this.target[name] }
         return null
     }
     /**
@@ -158,9 +154,8 @@ class DeobfRef {
      * @returns {string?}
      */
     methodName(...method_names) {
-        let methods = this.methods
         for (let name of method_names)
-            if (methods.includes(name))
+            if (this.methods.includes(name))
                 return name
         return null
     }
@@ -191,31 +186,22 @@ class DeobfRef {
     }
 }
 
-/** @type {JavaClass<ChunkPos>} */
-const ChunkPos = Java.type('net.minecraft.world.level.ChunkPos')
-/** @type {mcjty.lostradar.data.ClientMapData} @link {https://github.com/McJtyMods/LostRadar} */
-const ClientMapData = Java.type('mcjty.lostradar.data.ClientMapData').getData()
-/** @type {net.minecraft.util.Identifier} */
-const Identifier = DeobfRef.Type(
-    'net.minecraft.resources.ResourceLocation', 'net.minecraft.class_2960',
-    'net.minecraft.util.Identifier', 'net.minecraft.src.C_5265_')
-/** @type {Java.type<ItemStackHelper>} */
-const ItemStackHelper = Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
-
-
+/** @type {GetJava.Type$Graal<ChunkPos>} */
+const ChunkPos = DeobfRef.type('net.minecraft.world.level.ChunkPos',
+    'net.minecraft.class_1923', 'net.minecraft.util.math.ChunkPos', 'net.minecraft.src.C_1560_')
+/** @type {GetJava.Type$Graal<ResourceLocation>} */
+const ResourceLocation = DeobfRef.type('net.minecraft.resources.ResourceLocation',
+    'net.minecraft.class_2960', 'net.minecraft.util.Identifier', 'net.minecraft.src.C_5265_')
+/** @type {GetJava.Type$Graal<ItemStackHelper>} */
+const ItemStackHelper = DeobfRef.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
+/** @type {GetJava.Type$Graal<mcjty.lostradar.data.ClientMapData>} @link {https://github.com/McJtyMods/LostRadar} */
+const ClientMapData = DeobfRef.type('mcjty.lostradar.data.ClientMapData')?.getData()
 /** 长类名集中管理 */
-const IMPORT = {
+const ModImport = {
     // === Java 标准 ===
-    Object: 'java.lang.Object',
-    Double: 'java.lang.Double',
-    Boolean: 'java.lang.Boolean',
-    Float: 'java.lang.Float',
-    String: 'java.lang.String',
-    ArrayList: 'java.util.ArrayList',
-    Collections: 'java.util.Collections',
-    Iterator: 'java.util.Iterator',
-    Function: 'java.util.function.Function',
-    Throwable: 'java.lang.Throwable',
+    Object: 'java.lang.Object', Double: 'java.lang.Double', Boolean: 'java.lang.Boolean', Float: 'java.lang.Float',
+    String: 'java.lang.String', ArrayList: 'java.util.ArrayList', Collections: 'java.util.Collections',
+    Iterator: 'java.util.Iterator', Function: 'java.util.function.Function', Throwable: 'java.lang.Throwable',
     // === MC 类（探测） ===
     GuiGraphics: DeobfRef.className(
         'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
@@ -252,8 +238,7 @@ const IMPORT = {
 class ModBuilder {
     static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
     static namespace = 'XaeroOverlay'
-    static suffix = '' + `_${Date.now()}`
-
+    static suffix = _dev ? `_${Date.now()}` : ''
     /** 共用 Element 短名 */
     static Element = `${this.namespace}_Element${this.suffix}`
     static Context = `${this.namespace}_Context${this.suffix}`
@@ -269,7 +254,6 @@ class ModBuilder {
         Reader: `${this.namespace}_WorldMapReader${this.suffix}`,
         Renderer: `${this.namespace}_WorldMapRenderer${this.suffix}`,
     }
-
     static className(name) { return this.package + name }
     static load(name) { try { return Reflection.getClassFromClassBuilderResult(name) } catch { return null } }
     /** 构建类
@@ -285,103 +269,93 @@ class ModBuilder {
         methods?.forEach(v => builder.addMethod(v))
         return builder.finishBuildAndFreeze()
     }
-
+    /** 
+     * @typedef {Object} XaeroElement
+     * @prop {int} x @prop {int} z @prop {int} color @prop {int} size @prop {boolean} large 
+     * @prop {double} scale  @prop {boolean} enabled @prop {Function} render
+     * @prop {()=>double} centerX @prop {()=>double} centerZ @prop {()=>string} displayName
+     */
+    /**  @returns {JavaClass<XaeroElement>} */
     static createElementClass() {
+
         const name = this.Element
-        const { String, Function } = IMPORT
+        const { String, Function } = ModImport
         return this.load(name) ?? this.builder({
-            name: name,
-            fields: [
-                `public int x;`,
-                `public int z;`,
-                `public int color = 0x80FF0000;`,
-                `public int size = 16;`,
-                `public boolean large = false;`,
+            name: name, fields: [
+                `public int x;`, `public int z;`, `public int color = 0;`,
+                `public int size = 16;`, `public boolean large = false;`,
                 `public ${Function} render = null;`,
-            ],
-            constructors: [`public ${name}(int x, int z, int color, int size, boolean large, ${Function} render) {
+            ], constructors: [`public ${name}(int x, int z, int color, int size, boolean large, ${Function} render) {
                 this.x = x; this.z = z; this.color = color; this.size = size; this.large = large; this.render = render;
-            }`],
-            methods: [
+            }`], methods: [
                 `public double centerX() { return (this.x + 0.5) * 16.0; }`,
                 `public double centerZ() { return (this.z + 0.5) * 16.0; }`,
                 `public ${String} displayName() { return x + "," + z; }`,
             ]
         })
     }
+    /**
+     * @typedef {Object} XaeroContext
+     * @prop {Packages.java.util.ArrayList<XaeroElement>} elements
+     * @prop {double} scale @prop {boolean} enabled
+     */
+    /**  @returns {JavaClass<XaeroContext>} */
     static createContextClass() {
         const name = this.Context
-        const { ArrayList } = IMPORT
+        const { ArrayList } = ModImport
         return this.load(name) ?? this.builder({
-            name: name,
-            fields: [
+            name: name, fields: [
                 `public ${ArrayList} elements = new ${ArrayList}();`,
-                `public double scale = 1.0;`,
-                `public boolean enabled = true;`,
+                `public double scale = 1.0;`, `public boolean enabled = true;`,
             ],
-            constructors: [`public ${name}() { super(); }`],
         })
     }
     static createProviderClass(name, extend, location) {
-        const { Object, Iterator, Collections, ArrayList, Minecraft } = IMPORT
+        const { Object, Iterator, Collections, ArrayList, Minecraft } = ModImport
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         const mcGet = DeobfRef.methodName(Minecraft, 'getInstance', 'method_1551', 'm_91087_')
         const mcPlayerField = DeobfRef.fieldName(Minecraft, 'player', 'field_1724', 'f_91074_')
-        const entityCls = DeobfRef.className(
-            'net.minecraft.world.entity.Entity', 'net.minecraft.class_1297',
-            'net.minecraft.entity.Entity', 'net.minecraft.src.C_507_')
+        const entityCls = DeobfRef.className('net.minecraft.world.entity.Entity',
+            'net.minecraft.class_1297', 'net.minecraft.entity.Entity', 'net.minecraft.src.C_507_')
         const pGetX = DeobfRef.methodName(entityCls, 'getX', 'method_23317', 'm_20185_')
         const pGetZ = DeobfRef.methodName(entityCls, 'getZ', 'method_23321', 'm_20189_')
         const MINI_MAX_DIST = 180
         return this.load(name) ?? this.builder({
-            name: name, extend: extend,
-            fields: [`public ${Iterator} iterator = ${Collections}.emptyIterator();`],
-            constructors: [`public ${name}() { super(); }`],
+            name: name, extend: extend, fields: [`public ${Iterator} iterator = ${Collections}.emptyIterator();`],
             methods: [
-                `public void begin(${location} location, ${Object} ctx) {
+                `public void begin(${location} loc, ${Object} ctx) {
                     ${context} context = (${context}) ctx;
-                    if (location != ${location}.OVER_MINIMAP) {
-                        this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
-                        return;
-                    }
+                    if (loc != ${location}.OVER_MINIMAP)
+                        return this.iterator = new ${ArrayList}(((${context}) ctx).elements).iterator();
                     ${ArrayList} filtered = new ${ArrayList}();
                     ${Minecraft} mc = ${Minecraft}.${mcGet}();
                     if (mc != null && mc.${mcPlayerField} != null) {
-                        double px = mc.${mcPlayerField}.${pGetX}();
-                        double pz = mc.${mcPlayerField}.${pGetZ}();
+                        double px = mc.${mcPlayerField}.${pGetX}(); double pz = mc.${mcPlayerField}.${pGetZ}();
                         double maxDistSq = java.lang.Math.pow(${MINI_MAX_DIST} / context.scale, 2.0);
                         ${ArrayList} elements = context.elements;
                         for (int i = 0; i < elements.size(); i++) {
                             ${element} el = (${element}) elements.get(i);
                             if (el == null) continue;
-                            double dx = el.centerX() - px;
-                            double dz = el.centerZ() - pz;
+                            double dx = el.centerX() - px; double dz = el.centerZ() - pz;
                             if (dx * dx + dz * dz <= maxDistSq) filtered.add(el);
                         }
                     }
                     this.iterator = filtered.iterator();
                 }`,
-                `public boolean hasNext(${location} loc, ${Object} ctx) {
-                    return this.iterator.hasNext();
-                }`,
+                `public boolean hasNext(${location} loc, ${Object} ctx) { return this.iterator.hasNext(); }`,
                 `public ${Object} getNext(${location} loc, ${Object} ctx) {
-                    return this.iterator.hasNext() ? this.iterator.next() : null;
-                }`,
-                `public void end(${location} loc, ${Object} ctx) {
-                    this.iterator = ${Collections}.emptyIterator();
-                }`,
+                    return this.iterator.hasNext() ? this.iterator.next() : null;}`,
+                `public void end(${location} loc, ${Object} ctx) { this.iterator = ${Collections}.emptyIterator(); }`,
             ]
         })
     }
     static createReaderClass(name, extend, location) {
-        const { Object, String, Minecraft } = IMPORT
+        const { Object, String, Minecraft } = ModImport
         let elm = this.className(this.Element)
         let ctx = this.className(this.Context)
         return this.load(name) ?? this.builder({
-            name: name, extend: extend,
-            constructors: [`public ${name}() { super(); }`],
-            methods: [
+            name: name, extend: extend, methods: [
                 `public boolean isHidden(${Object} e, ${Object} c) { return e == null; }`,
                 `public double getRenderX(${Object} e, ${Object} c, float p) { return ((${elm}) e).centerX(); }`,
                 `public double getRenderY(${Object} e, ${Object} c, float p) { return 0.0; }`,
@@ -405,21 +379,18 @@ class ModBuilder {
             ]
         })
     }
-
     static createMinimapProviderClass() {
-        return this.createProviderClass(this.MINIMAP.Provider,
-            IMPORT.MiniProvider, IMPORT.MiniLocation)
+        return this.createProviderClass(this.MINIMAP.Provider, ModImport.MiniProvider, ModImport.MiniLocation)
     }
     static createMinimapReaderClass() {
-        return this.createReaderClass(this.MINIMAP.Reader,
-            IMPORT.MiniReader, IMPORT.MiniLocation)
+        return this.createReaderClass(this.MINIMAP.Reader, ModImport.MiniReader, ModImport.MiniLocation)
     }
     static createMinimapRendererClass() {
         const name = this.MINIMAP.Renderer
         const {
             MiniRenderer, MiniLocation, MiniInfo, BufferSource, MiniTextureProvider,
             Object, GuiGraphics, Double, Boolean, Throwable
-        } = IMPORT
+        } = ModImport
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         let reader = this.className(this.MINIMAP.Reader)
@@ -446,35 +417,28 @@ class ModBuilder {
                     if (!${Double}.isFinite(scale) || scale <= 0.0 || scale > 64.0) scale = 1.0;
                     try {
                         ${Object}[] args = new ${Object}[] {
-                            graphics, el, info,
-                            ${Double}.valueOf(localX),
-                            ${Double}.valueOf(localY),
-                            ${Double}.valueOf(scale),
-                            ${Boolean}.FALSE,
-                            ${Boolean}.valueOf(hovered)
+                            graphics, el, info, ${Double}.valueOf(localX), ${Double}.valueOf(localY),
+                            ${Double}.valueOf(scale), ${Boolean}.FALSE, ${Boolean}.valueOf(hovered)
                         };
                         ${Object} result = e.render.apply(args);
                         return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
-                    } catch (${Throwable} t) {
-                        return false;
-                    }
+                    } catch (${Throwable} t) { return false; }
                 }`,
             ]
         })
     }
-
     static createWorldMapProviderClass() {
-        return this.createProviderClass(this.WORLDMAP.Provider, IMPORT.WorldProvider, IMPORT.WorldLocation)
+        return this.createProviderClass(this.WORLDMAP.Provider, ModImport.WorldProvider, ModImport.WorldLocation)
     }
     static createWorldMapReaderClass() {
-        return this.createReaderClass(this.WORLDMAP.Reader, IMPORT.WorldReader, IMPORT.WorldLocation)
+        return this.createReaderClass(this.WORLDMAP.Reader, ModImport.WorldReader, ModImport.WorldLocation)
     }
     static createWorldMapRendererClass() {
         const name = this.WORLDMAP.Renderer
         const {
             WorldRenderer, WorldLocation, WorldInfo, BufferSource, WorldTextureProvider,
             Object, GuiGraphics, Double, Float, Boolean, Throwable
-        } = IMPORT
+        } = ModImport
         let element = this.className(this.Element)
         let context = this.className(this.Context)
         let reader = this.className(this.WORLDMAP.Reader)
@@ -502,18 +466,12 @@ class ModBuilder {
                     try {
                         double scale = info.scale;
                         ${Object}[] args = new ${Object}[] {
-                            graphics, el, info,
-                            ${Double}.valueOf(partialX),
-                            ${Double}.valueOf(partialY),
-                            ${Double}.valueOf(scale),
-                            ${Boolean}.TRUE,
-                            ${Boolean}.valueOf(hovered)
+                            graphics, el, info, ${Double}.valueOf(partialX), ${Double}.valueOf(partialY),
+                            ${Double}.valueOf(scale), ${Boolean}.TRUE, ${Boolean}.valueOf(hovered)
                         };
                         ${Object} result = el.render.apply(args);
                         return (result instanceof ${Boolean}) && ((${Boolean}) result).booleanValue();
-                    } catch (${Throwable} t) {
-                        return false;
-                    }
+                    } catch (${Throwable} t) { return false; }
                 }`,
             ]
         })
@@ -523,16 +481,16 @@ class ModBuilder {
 class XaeroOverlayManager {
     /** @typedef {net.minecraft.network.chat.Component} Component */
     constructor() {
-        /** @type {JavaClass?} 共用类 */
+        /** @type {JavaClass<XaeroElement>?} 共用类 */
         this.ElementCls = null
-        /** @type {JavaClass?} 共用类 */
+        /** @type {JavaClass<XaeroElement>?} 共用类 */
         this.ContextCls = null
 
         /** @type {boolean} 小地图是否已注册 */
         this.minimapInited = false
         /** @type {xaero.hud.minimap.element.render.over.MinimapElementOverMapRendererHandler?} 小地图Handler实例 */
         this.minimapHandler = null
-        /** @type {object?} 小地图 Context 实例 */
+        /** @type {XaeroContext?} 小地图 Context 实例 */
         this.minimapContext = null
         /** @type {object?} 小地图 Renderer 实例 */
         this.minimapRenderer = null
@@ -541,7 +499,7 @@ class XaeroOverlayManager {
         this.worldMapInited = false
         /** @type {xaero.map.element.MapElementRenderHandler?} 世界地图Handler 实例 */
         this.worldMapHandler = null
-        /** @type {object?} 世界地图 Context 实例 */
+        /** @type {XaeroContext?} 世界地图 Context 实例 */
         this.worldMapContext = null
         /** @type {object?} 世界地图 Renderer 实例 */
         this.worldMapRenderer = null
@@ -550,55 +508,47 @@ class XaeroOverlayManager {
     /** 注册小地图渲染层 */
     registerMinimap() {
         if (this.minimapInited) return this
-        this.minimapHandler = Java.type(IMPORT.Minimap).instance.getMinimap().getOverMapRendererHandler()
-
+        this.minimapHandler = Java.type(ModImport.Minimap).instance.getMinimap().getOverMapRendererHandler()
         ModBuilder.createMinimapProviderClass()
         ModBuilder.createMinimapReaderClass()
         const rendererCls = ModBuilder.createMinimapRendererClass()
         this.minimapContext = Reflection.newInstance(this.ContextCls)
         this.minimapRenderer = Reflection.newInstance(rendererCls, this.minimapContext)
         this.minimapHandler.add(this.minimapRenderer)
-
         this.minimapInited = true
-        mclog('小地图渲染层已注册')
         return this
     }
     /** 注册世界地图渲染层 */
     registerWorldMap() {
         if (this.worldMapInited) return this
-        this.worldMapHandler = Java.type(IMPORT.WorldMap).mapElementRenderHandler
-
+        this.worldMapHandler = Java.type(ModImport.WorldMap).mapElementRenderHandler
         ModBuilder.createWorldMapProviderClass()
         ModBuilder.createWorldMapReaderClass()
         const rendererCls = ModBuilder.createWorldMapRendererClass()
         this.worldMapContext = Reflection.newInstance(this.ContextCls)
         this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext)
-
         this.worldMapHandler.add(this.worldMapRenderer)
         this.worldMapInited = true
-        mclog('世界地图渲染层已注册')
         return this
     }
-
     /** 注册所有渲染层 */
     register() {
         this.ElementCls = ModBuilder.createElementClass()
         this.ContextCls = ModBuilder.createContextClass()
         this.registerMinimap()
         this.registerWorldMap()
+        mclog('地图渲染层已注册')
         return this
     }
     /** 从渲染管线移除 */
     unregister() {
         if (this.minimapInited) {
-            const cls = Reflection.getClass(IMPORT.MiniRendererHandler)
-            const f = Reflection.getDeclaredField(cls, 'renderers')
+            const f = Reflection.getDeclaredField(Reflection.getClass(ModImport.MiniRendererHandler), 'renderers')
             f.setAccessible(true)
             f.get(this.minimapHandler).remove(this.minimapRenderer)
             this.minimapInited = false
             this.minimapRenderer = this.minimapContext = null
         }
-
         if (this.worldMapInited) {
             const f = this.worldMapHandler.getClass().getDeclaredField('renderers')
             f.setAccessible(true)
@@ -606,11 +556,9 @@ class XaeroOverlayManager {
             this.worldMapInited = false
             this.worldMapRenderer = this.worldMapContext = null
         }
-
         mclog('渲染层已卸载')
         return true
     }
-
     /**
      * 添加一个高亮元素
      * @param {number} cx X
@@ -621,7 +569,7 @@ class XaeroOverlayManager {
      * @param {Function?} [render=null] 元素渲染回调
      * @returns {object} 元素实例
      */
-    addElement(cx, cz, color = 0x80FF0000, size = 16, large = false, render = null) {
+    add(cx, cz, color = 0x80FF0000, size = 16, large = false, render = null) {
         if (!this.minimapInited && !this.worldMapInited) throw new Error('XaeroOverlayManager 未 register')
 
         const ElementCls = this.ElementCls
@@ -635,7 +583,7 @@ class XaeroOverlayManager {
      * @param {object} handle addElement 返回的元素实例
      * @returns {boolean} 是否移除成功
      */
-    removeElement(handle) {
+    remove(handle) {
         if (!handle) return false
         let removed = false
         if (this.minimapInited) removed = this.minimapContext.elements.remove(handle) || removed
@@ -643,7 +591,7 @@ class XaeroOverlayManager {
         return removed
     }
     /** 清空所有元素 */
-    clearElements() {
+    clear() {
         this.minimapInited && this.minimapContext.elements.clear()
         this.worldMapInited && this.worldMapContext.elements.clear()
     }
@@ -658,159 +606,12 @@ class XaeroOverlayManager {
     }
     toggle() { return this.setEnabled(!this.isEnabled()) }
 }
-
-/** Draw2D拓展：支持裁剪画布+渲染提示框
- * @typedef {{x:int,y:int,width:int,height:int}} Region 显示区域
- * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
- */
-class Draw2DUtils {
-    /** @type {net.minecraft.client.gui.Font} */
-    static Font = new DeobfRef(Client.getMinecraft())
-        .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
-    /** @type {JavaClass<Draw2D>} */
-    static Draw2D = Reflection.getClass(
-        'xyz.wagyourtail.jsmacros.client.api.classes.render.Draw2D',
-        'com.jsmacrosce.jsmacros.client.api.classes.render.Draw2D')
-    /** @type {DeobfRef<DrawContext>} */
-    static DrawContext = DeobfRef.Class(
-        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
-        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
-
-    /** 获取文本宽度
-     * @param {string} text
-     * @param {number} [scale=1]
-     * @returns {int}
-     */
-    static getWidth(text, scale = 1) {
-        let names = ['width', 'method_1727', 'getWidth', 'm_92895_']
-        let length = null
-        try { length = this.Font?.call(names, text) } catch {
-            try {
-                Client.runOnMainThread(JavaWrapper.methodToJava(() => {
-                    length = this.Font?.call(names, text) ?? length
-                }), true, 1000)
-            } catch { }
-        }
-        return Math.ceil((length ?? text.length * 6) * scale)
-    }
-    /**
-     * 创建限制显示范围画布
-     * @param {Region} region 显示区域
-     * @param {(drawContext:DrawContext) => void} [onrender] 每帧渲染回调
-     * @returns {Draw2D} 裁剪后的 Draw2D
-     */
-    static createDraw2D(region, onrender) {
-        let builder = Reflection.createClassProxyBuilder(this.Draw2D)
-        let on = this.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
-        let off = this.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
-        if (on && off) {
-            builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
-                let dcref = new DeobfRef(args[0])
-                dcref.call(['flush', 'method_51452', 'draw', 'm_280262_'])
-                let { x, y, width, height } = region
-                dcref.invoke(on, x | 0, y | 0, (x + width) | 0, (y + height) | 0)
-                let result = proxyRef.parent(args)
-                dcref.invoke(off)
-                try { onrender && onrender(...args) } catch { }
-                return result
-            }))
-            let proxy = builder.buildInstance([])
-            proxy.widthSupplier = () => region.width
-            proxy.heightSupplier = () => region.height
-            return proxy
-        }
-        return Hud.createDraw2D()
-    }
-    /**
-     * 绘制气泡提示框
-     * @param {DrawContext} graphics 画板
-     * @param {int} x 坐标
-     * @param {int} y 坐标
-     * @param {JavaArray<Component>} components 格式化文本列表
-     * @param {number} scale
-     */
-    static renderToolTip(graphics, x, y, components, scale) {
-        if (graphics) {
-            let method = [
-                'setComponentTooltipForNextFrame', 'renderComponentTooltip',
-                'method_51434', 'drawTooltip', 'm_403688_', 'm_280666_'
-            ]
-            let dcref = new DeobfRef(graphics)
-            let stack = new DeobfRef(dcref.call(['pose', 'method_51448', 'getMatrices', 'm_280168_']))
-            stack.call(['pushPose', 'method_22903', 'push', 'm_85836_'])
-            let last = stack.call(['last', 'method_23760', 'peek', 'm_85850_'])
-            let getPositionMatrix = DeobfRef.methodName(DeobfRef.className(
-                'com.mojang.blaze3d.vertex.PoseStack$Pose', 'net.minecraft.class_4587$class_4665',
-                'net.minecraft.client.util.math.MatrixStack$Entry', 'net.minecraft.src.C_3181_$C_3183_'
-            ), 'pose', 'method_23761', 'getPositionMatrix', 'm_252922_')
-            new DeobfRef(last).invoke(getPositionMatrix).identity()
-            stack.call(['scale', 'method_22905', 'm_85841_'], scale ?? 1, scale ?? 1, 1)
-            try {
-                dcref.call(method, this.Font, components, Math.round(x), Math.round(y))
-                dcref.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
-            } catch {
-                dcref.call(method, this.Font, components, Math.round(x), Math.round(y),
-                    Player.getPlayer().getMainHand().getRaw())
-            }
-            stack.call(['popPose', 'method_22909', 'pop', 'm_85849_'])
-        }
-    }
-
-    /**
-     * @param {Region} region 区域
-     * @param {(self:Draw2DUtils,drawContext:DrawContext) => void} onrender 渲染事件
-     */
-    constructor(region, onrender) {
-        /** @type {Region} 区域 */
-        this.region = region
-        /** @type {(self:Draw2DUtils,drawContext:DrawContext) => void} 渲染事件 */
-        this.onrender = onrender
-        /** @type {Draw2D} */
-        this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
-        /** @type {{x:number,y:number,scale:number,tips:string[]}[]} 提示框内容 */
-        this.tooltips = []
-        /** @type {null|((self:Draw2DUtils) => {x:number,y:number,scale:number,tips:string[]}[])} */
-        this.dynamicTooltips = null
-
-    }
-    /** 气泡提示框内容组件
-     * @param {string[]} tooltips
-     * @returns {JavaArray<Component>}
-     */
-    asComponents(tooltips) {
-        let arr = JavaUtils.createArrayList()
-        for (let v of tooltips)
-            arr.add(Chat.createTextHelperFromString(v).getRaw())
-        return arr
-    }
-    /** @param {DrawContext} drawContext */
-    render(drawContext) {
-        this.onrender && this.onrender(this, drawContext)
-        if (this.dynamicTooltips)
-            this.tooltips = this.dynamicTooltips(this)
-        if (this.tooltips.length > 0) {
-            for (let i of this.tooltips) {
-                if (i.tips.length == 0) continue
-                let x = i.x ?? Hud.getMouseX(), y = i.y ?? Hud.getMouseY()
-                let components = this.asComponents(i.tips)
-                let scale = i.scale ?? 1
-                Draw2DUtils.renderToolTip(drawContext, x / scale, y / scale, components, scale)
-            }
-        }
-    }
-    /** @param {string[]|(self:Draw2DUtils) => string[]} v */
-    setTooltip(v) { typeof v == 'function' ? this.dynamicTooltips = v : this.tooltips = v }
-    /** 清除提示框 */
-    removeTooltip() { this.tooltips = []; this.dynamicTooltips = null }
-}
-
 /** Xaero 世界地图屏幕的坐标转换封装 */
 class WorldMap {
     /** @param {IScreen} screen */
     constructor(screen) {
         /** @type {IScreen} */ this.raw = screen
-        /** @type {Packages.org.joor.Reflect} */
-        this.target = Reflection.getReflect(screen)
+        /** @type {Packages.org.joor.Reflect} */ this.target = Reflection.getReflect(screen)
     }
     /** @returns {number} 屏幕宽（GUI 缩放坐标） */
     get width() { return this.raw.getWidth() }
@@ -818,18 +619,48 @@ class WorldMap {
     get height() { return this.raw.getHeight() }
     /** @returns {number} 地图缩放比例 */
     get mapScale() { return this.target.get('scale') }
-    /** @returns {number} 鼠标所在方块 X 坐标 */
-    get mouseBlockPosX() { return this.target.get('mouseBlockPosX') }
-    /** @returns {number} 鼠标所在方块 Y 坐标 */
-    get mouseBlockPosY() { return this.target.get('mouseBlockPosY') }
-    /** @returns {number} 鼠标所在方块 Z 坐标 */
-    get mouseBlockPosZ() { return this.target.get('mouseBlockPosZ') }
+    /** @returns {number} 地图缩放比例 */
+    get userScale() { return this.target.get('userScale') }
     /** @returns {string} 鼠标所在维度 */
     get mouseBlockDim() { return this.target.get('mouseBlockDim') }
-    /** @returns {number} 相机中心世界 X 坐标 */
+    /** @returns {number} 鼠标所在方块坐标 */
+    get mouseBlockPosX() { return this.target.get('mouseBlockPosX') }
+    /** @returns {number} 鼠标所在方块坐标 */
+    get mouseBlockPosY() { return this.target.get('mouseBlockPosY') }
+    /** @returns {number} 鼠标所在方块坐标 */
+    get mouseBlockPosZ() { return this.target.get('mouseBlockPosZ') }
+    /** @returns {number} 地图中心方块坐标 */
     get cameraX() { return this.target.get('cameraX') }
-    /** @returns {number} 相机中心世界 Z 坐标 */
+    /** @returns {number} 地图中心方块坐标 */
     get cameraZ() { return this.target.get('cameraZ') }
+    /** @returns {MapProcessor} 地图进程 */
+    get mapProcessor() { return this.target.get('mapProcessor') }
+    /** @returns {int} 地图当前显示层级 */
+    get caveLayer() { return this.mapProcessor.getCurrentCaveLayer() }
+    /** @returns {ResourceKey<Biome>} 地图纹理群系 */
+    getBiomeFromTexture(caveLayer, x, z) {
+        let textureLevel = 0
+        let userScale = this.userScale
+        if (userScale < 1)
+            textureLevel = Math.min(Math.floor(Math.log(1 / userScale) / Math.log(2)), 3)
+        let leveledRegionShift = 9 + textureLevel
+        let mouseRegX = x >> leveledRegionShift, mouseRegZ = z >> leveledRegionShift
+        let reg = this.mapProcessor.getLeveledRegion(caveLayer, mouseRegX, mouseRegZ, textureLevel)
+        if (!reg || !reg.hasTextures()) return null
+
+        let maxRegBlockCoord = (1 << leveledRegionShift) - 1
+        let mouseRegPixelX = (x & maxRegBlockCoord) >> textureLevel
+        let mouseRegPixelZ = (z & maxRegBlockCoord) >> textureLevel
+        let debugTextureX = (x >> leveledRegionShift - 3) & 7
+        let debugTextureY = (z >> leveledRegionShift - 3) & 7
+
+        let tex = reg.getTexture(debugTextureX, debugTextureY)
+        if (!tex) return null;
+
+        let pixelInsideTexX = mouseRegPixelX & 63
+        let pixelInsideTexZ = mouseRegPixelZ & 63
+        return tex.getBiome(pixelInsideTexX, pixelInsideTexZ)
+    }
 
     /** @returns {number} 每世界方块对应的屏幕像素 */
     scale() { return this.mapScale / Hud.getScaleFactor() }
@@ -936,7 +767,6 @@ class Event {
     /** 停止事件 */
     stopPropagation() { this.consumed = true }
 }
-
 /** 事件池 */
 class EventBus {
     constructor() {
@@ -997,424 +827,214 @@ class EventBus {
     /** 停止Tick监听并清空所有事件 */
     stop() { if (this.tick) JsMacros.off(this.tick), this.tick = null; this.events = {} }
 }
+/** Draw2D拓展：支持裁剪画布+渲染提示框
+ * @typedef {{x:int,y:int,width:int,height:int}} Region 显示区域
+ * @typedef {net.minecraft.client.gui.DrawContext} DrawContext
+ */
+class Draw2DUtils {
+    /** @type {net.minecraft.client.gui.Font} */
+    static Font = new DeobfRef(Client.getMinecraft())
+        .get('font', 'field_1772', 'textRenderer', 'f_91114_', 'f_91062_')
+    /** @type {JavaClass<Draw2D>} */
+    static Draw2D = Reflection.getClass(
+        'xyz.wagyourtail.jsmacros.client.api.classes.render.Draw2D',
+        'com.jsmacrosce.jsmacros.client.api.classes.render.Draw2D')
+    /** @type {DeobfRef<DrawContext>} */
+    static DrawContext = DeobfRef.class(
+        'net.minecraft.client.gui.GuiGraphics', 'net.minecraft.class_332',
+        'net.minecraft.client.gui.DrawContext', 'net.minecraft.src.C_279497_')
+    /**
+     * 创建限制显示范围画布
+     * @param {Region} region 显示区域
+     * @param {(drawContext:DrawContext) => void} [onrender] 每帧渲染回调
+     * @returns {Draw2D} 裁剪后的 Draw2D
+     */
+    static createDraw2D(region, onrender) {
+        let builder = Reflection.createClassProxyBuilder(this.Draw2D)
+        let on = this.DrawContext.methodName('enableScissor', 'method_44379', 'm_280588_')
+        let off = this.DrawContext.methodName('disableScissor', 'method_44380', 'm_280618_')
+        if (on && off) {
+            builder.addMethod('render', JavaWrapper.methodToJava((proxyRef, args) => {
+                let dcref = new DeobfRef(args[0])
+                dcref.call(['flush', 'method_51452', 'draw', 'm_280262_'])
+                let { x, y, width, height } = region
+                dcref.invoke(on, x | 0, y | 0, (x + width) | 0, (y + height) | 0)
+                let result = proxyRef.parent(args)
+                dcref.invoke(off)
+                try { onrender && onrender(...args) } catch { }
+                return result
+            }))
+            let proxy = builder.buildInstance([])
+            proxy.widthSupplier = () => region.width
+            proxy.heightSupplier = () => region.height
+            return proxy
+        }
+        return Hud.createDraw2D()
+    }
+    /**
+     * 绘制气泡提示框
+     * @param {DrawContext} graphics 画板
+     * @param {JavaArray<Component>} components 格式化文本列表
+     * @param {int} x 坐标
+     * @param {int} y 坐标
+     * @param {number} scale
+     */
+    static renderToolTip(graphics, components, x, y, scale) {
+        if (graphics) {
+            let ox = Math.round(x ?? Hud.getMouseX()), oy = Math.round(y ?? Hud.getMouseY()), oscale = scale ?? 1
+            let method = [
+                'setComponentTooltipForNextFrame', 'renderComponentTooltip',
+                'method_51434', 'drawTooltip', 'm_403688_', 'm_280666_']
+            let getPositionMatrix = DeobfRef.methodName(DeobfRef.className(
+                'com.mojang.blaze3d.vertex.PoseStack$Pose', 'net.minecraft.class_4587$class_4665',
+                'net.minecraft.client.util.math.MatrixStack$Entry', 'net.minecraft.src.C_3181_$C_3183_'
+            ), 'pose', 'method_23761', 'getPositionMatrix', 'm_252922_')
+
+            let graph = new DeobfRef(graphics)
+            let stack = new DeobfRef(graph.call(['pose', 'method_51448', 'getMatrices', 'm_280168_']))
+            stack.call(['pushPose', 'method_22903', 'push', 'm_85836_'])
+            let last = stack.call(['last', 'method_23760', 'peek', 'm_85850_'])
+            new DeobfRef(last).invoke(getPositionMatrix).identity()
+            stack.call(['scale', 'method_22905', 'm_85841_'], scale ?? 1, scale ?? 1, 1)
+            try {
+                graph.call(method, this.Font, components, ox, oy)
+                graph.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
+            } catch {
+                graph.call(method, this.Font, components, ox, oy,
+                    Client.getRegistryManager().getItemStack('minecraft:air').getRaw())
+            }
+            stack.call(['popPose', 'method_22909', 'pop', 'm_85849_'])
+        }
+    }
+
+    /**
+     * @param {Region} region 区域
+     * @param {(self:Draw2DUtils,drawContext:DrawContext) => void} onrender 渲染事件
+     */
+    constructor(region, onrender) {
+        /** @type {Region} 区域 */
+        this.region = region
+        /** @type {(self:Draw2DUtils,drawContext:DrawContext) => void} 渲染事件 */
+        this.onrender = onrender
+        /** @type {Draw2D} */
+        this.target = Draw2DUtils.createDraw2D(this.region, (ctx) => this.render(ctx))
+        /** @type {{x:number,y:number,scale:number,tips:string[]}[]} 提示框内容 */
+        this.tooltips = []
+        /** @type {null|((self:Draw2DUtils) => {x:number,y:number,scale:number,tips:string[]}[])} */
+        this.dynamicTooltips = null
+
+    }
+    /** 气泡提示框内容组件
+     * @param {string[]} tooltips
+     * @returns {JavaArray<Component>}
+     */
+    asComponents(tooltips) {
+        let arr = JavaUtils.createArrayList()
+        for (let v of tooltips)
+            arr.add(Chat.createTextHelperFromString(v).getRaw())
+        return arr
+    }
+    /** @param {DrawContext} drawContext */
+    render(drawContext) {
+        this.onrender && this.onrender(this, drawContext)
+        if (this.dynamicTooltips)
+            this.tooltips = this.dynamicTooltips(this)
+        if (this.tooltips.length > 0) {
+            for (let i of this.tooltips) {
+                if (i.tips.length == 0) continue
+                let x = i.x ?? Hud.getMouseX(), y = i.y ?? Hud.getMouseY()
+                let components = this.asComponents(i.tips)
+                let scale = i.scale ?? 1
+                Draw2DUtils.renderToolTip(drawContext, components, x / scale, y / scale, scale)
+            }
+        }
+    }
+    /** @param {string[]|(self:Draw2DUtils) => string[]} v */
+    setTooltip(v) { typeof v == 'function' ? this.dynamicTooltips = v : this.tooltips = v }
+    /** 清除提示框 */
+    removeTooltip() { this.tooltips = []; this.dynamicTooltips = null }
+}
+
+const utils = {
+    /** @returns {ClientLevel} 主世界 ClientLevel */
+    level() { return new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_') },
+    /** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
+    getChunkKey() { let c = Player.getPlayer()?.getChunk(); return `${c.getChunkX()},${c.getChunkZ()}` },
+    /** @returns {string} 国际化翻译 */
+    transkey(key) { return Chat.createTextHelperFromTranslationKey(key).getString().trim() },
+    /** @return {mcjty.lostradar.data.MapPalette$PaletteEntry} */
+    getRadarData(x, z, level) { return ClientMapData.getPaletteEntry(level ?? this.level(), new ChunkPos(x, z)) },
+    /** 扩展相邻同名建筑区块
+     * @param {number} cx 中心区块 X
+     * @param {number} cz 中心区块 Z
+     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} centerEntry 中心区块条目
+     * @returns {string[]} 区块 key 列表（含自身）
+     */
+    expandSameBuilding(cx, cz, centerEntry) {
+        const name = centerEntry.name()
+        const visited = new Set([`${cx},${cz}`])
+        if (!name.startsWith('multi_')) return Array.from(visited)
+        const queue = [[cx, cz]], level = utils.level()
+        while (queue.length > 0) {
+            let [x, z] = queue.shift()
+            for (let [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                let nx = x + dx, nz = z + dz, nkey = `${nx},${nz}`
+                if (visited.has(nkey)) continue
+                let nEntry = this.getRadarData(nx, nz, level)
+                if (!nEntry || nEntry.name() !== name) continue
+                visited.add(nkey)
+                queue.push([nx, nz])
+            }
+        }
+        return Array.from(visited)
+    },
+    /**
+     * 标记某区块所属建筑簇为已去过
+     * @param {number} cx 中心区块 X
+     * @param {number} cz 中心区块 Z
+     * @param {string} dim 维度
+     * @param {boolean} toggle 切换模式（true=已去过则取消，false=只标记）
+     * @param {boolean} [actionBar=false] 是否用动作栏输出（自动记录用）
+     * @returns {boolean} 是否实际发生了变更
+     */
+    markChunkAt(cx, cz, dim, toggle, actionBar = false) {
+        let entry = this.getRadarData(cx, cz)
+        if (!entry || entry.buildings().size() === 0) return false
+        let cluster = this.expandSameBuilding(cx, cz, entry)
+        let allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
+        let targetState = toggle ? !allVisited : true
+        let changed = 0
+        for (let k of cluster) {
+            let has = visitedStore.getTime(dim, k) != null
+            if (targetState !== has) { visitedStore.toggle(dim, k); changed++ }
+        }
+        if (actionBar) {
+            if (changed > 0) Chat.actionbar(`添加记录 §a${changed} §7个区块`)
+        } else {
+            mclog(targetState ? `已标记 §a${cluster.length} §7个区块` : `已取消 §c${cluster.length} §7个区块`)
+        }
+        return changed > 0
+    }
+}
 
 /** 进度查询 */
-class DCAdvancement {
-    constructor() { this.map = {} }
+const DCAdvancement = {
+    map: {}, manager: Player.getPlayer().getAdvancementManager(),
     loads() {
-        for (let v of Player.getPlayer().getAdvancementManager().getAdvancementsForIdentifiers().keySet())
-            if (v.startsWith('deceasedcraft:'))
-                this.map[v.replace(/\:.*\//, ':')] = v
-    }
+        for (let v of this.manager.getAdvancementsForIdentifiers().keySet())
+            if (v.startsWith('deceasedcraft:')) this.map[v.replace(/\:.*\//, ':')] = v
+    },
     isDone(buildid) {
         let id = this.map[`${buildid}`.split('/')[0]]
-        return id && Player.getPlayer().getAdvancementManager().getAdvancementProgress(id).isDone()
+        return id && this.manager.getAdvancementProgress(id).isDone()
     }
 }
-
-/** @returns {ClientLevel} 主世界 ClientLevel */
-function getClientLevel() {
-    return new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_')
-}
-/** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
-function getPlayerChunkKey() {
-    const chunk = Player.getPlayer()?.getChunk()
-    return `${chunk.getChunkX()},${chunk.getChunkZ()}`
-}
-/**
- * 扩展相邻同名建筑区块
- * @param {number} cx 中心区块 X
- * @param {number} cz 中心区块 Z
- * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} centerEntry 中心区块条目
- * @returns {string[]} 区块 key 列表（含自身）
- */
-function expandSameBuilding(cx, cz, centerEntry) {
-    const name = centerEntry.name()
-    const visited = new Set([`${cx},${cz}`])
-    if (!name.startsWith('multi_')) return Array.from(visited)
-
-    const level = getClientLevel()
-    const queue = [[cx, cz]]
-    while (queue.length > 0) {
-        const [x, z] = queue.shift()
-
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = x + dx
-            const nz = z + dz
-            const nkey = `${nx},${nz}`
-            if (visited.has(nkey)) continue
-            let nEntry = null
-            try {
-                nEntry = ClientMapData.getPaletteEntry(level, new ChunkPos(nx, nz))
-            } catch (e) { /* 忽略 */ }
-            if (!nEntry || nEntry.name() !== name) continue
-            visited.add(nkey)
-            queue.push([nx, nz])
-        }
-    }
-    return Array.from(visited)
-}
-
-/**
- * 标记某区块所属建筑簇为已去过
- * @param {number} cx 中心区块 X
- * @param {number} cz 中心区块 Z
- * @param {string} dim 维度
- * @param {boolean} toggle 切换模式（true=已去过则取消，false=只标记）
- * @param {boolean} [actionBar=false] 是否用动作栏输出（自动记录用）
- * @returns {boolean} 是否实际发生了变更
- */
-function markChunkAt(cx, cz, dim, toggle, actionBar = false) {
-    let entry = null
-    try { entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz)) } catch (e) { }
-
-    // 无雷达建筑：地图上无标记可画，不处理
-    if (!entry || entry.buildings().size() === 0) return false
-
-    const cluster = expandSameBuilding(cx, cz, entry)
-    const allVisited = cluster.every(k => visitedStore.getTime(dim, k) != null)
-    const targetState = toggle ? !allVisited : true
-    let changed = 0
-    for (const k of cluster) {
-        const has = visitedStore.getTime(dim, k) != null
-        if (targetState !== has) { visitedStore.toggle(dim, k); changed++ }
-    }
-
-    if (actionBar) {
-        if (changed > 0) Chat.actionbar(`添加记录 §a${changed} §7个区块`)
-    } else {
-        mclog(targetState ? `已标记 §a${cluster.length} §7个区块` : `已取消 §c${cluster.length} §7个区块`)
-    }
-    return changed > 0
-}
-
-/** 标记状态（附带纹理初始化） */
-const MarkerState = {
-    /** @typedef {{color:number, texture:CustomImage?, largeTexture:CustomImage?}} MarkerStateDef 标记状态定义 */
-    /** 未注册 + 未去过（红） */
-    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null, largeTexture: null },
-    /** 未注册 + 已去过（橙） */
-    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null, largeTexture: null },
-    /** 已注册 + 未去过（黄） */
-    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null, largeTexture: null },
-    /** 已注册 + 已去过（绿） */
-    REGISTERED_VISITED: { color: 0x44FF44, texture: null, largeTexture: null },
-    /** 预创建所有标记纹理 */
-    init() {
-        for (const [name, state] of Object.entries(this)) {
-            if (typeof state !== 'object' || !('color' in state)) continue
-            try {
-                // 普通建筑
-                state.texture = Hud.createTexture(16, 16, `lostradar_marker_${name}`)
-                    .setGraphicsColor(0x000000).fillRect(1, 1, 14, 14)
-                    .setGraphicsColor(state.color).drawRoundRect(0, 0, 15, 15, 8, 8)
-                    .drawRoundRect(3, 3, 9, 9, 8, 8).setXorMode(0x000000).drawRect(0, 0, 15, 15)
-                    .update()
-                // 大型建筑
-                state.largeTexture = Hud.createTexture(16, 16, `lostradar_marker_large_${name}`)
-                    .setGraphicsColor(0x000000).fillRect(0, 0, 15, 15)
-                    .setGraphicsColor(state.color).drawRoundRect(0, 0, 15, 15, 16, 16)
-                    .drawRoundRect(3, 3, 9, 9, 8, 8).drawRect(0, 0, 15, 15)
-                    .update()
-            } catch (e) {
-                // Chat.log(`§c[雷达] 纹理创建失败 ${name}: ${e}`)
-            }
-        }
-    }
-}
-
-/** 已去过区块存储 */
-class VisitedStore {
-    /**
-     * @param {string|string[]|() => string|string[]} readPaths 读取路径（按优先级）
-     * @param {string|() => string} [writePath] 写入路径；不传则用读取路径第一个
-     */
-    constructor(readPaths, writePath) {
-        /** @type {string|string[]|() => string|string[]} */ this._readPaths = readPaths
-        /** @type {string|() => string|undefined} */ this._writePath = writePath
-        /** @type {Object<string, Object<string, number>>?} 维度 → { 区块key: 时间戳 } */
-        this.cache = null
-    }
-
-    /** @returns {string[]} 读取路径列表（按优先级） */
-    get readPaths() {
-        let v = typeof this._readPaths == 'function' ? this._readPaths() : this._readPaths
-        return Array.isArray(v) ? v : [v]
-    }
-
-    /** @returns {string} 写入路径 */
-    get path() {
-        let p = this._writePath ?? this._readPaths
-        return typeof p == 'function' ? p() : (Array.isArray(p) ? p[0] : p)
-    }
-
-    /** 从本地文件加载 @returns {Object<string, Object<string, number>>} */
-    load() {
-        if (this.cache) return this.cache
-        this.cache = {}
-        for (const p of this.readPaths) {
-            try {
-                if (FS.exists(p)) {
-                    const raw = FS.open(p).read()
-                    if (raw && raw.length > 0) {
-                        this.cache = JSON.parse(raw)
-                        // 读的不是写入路径 → 迁移到写入路径
-                        if (p !== this.path && Object.keys(this.cache).length > 0) {
-                            mclog(`迁移记录 §a${p} §7→ §a${this.path}`)
-                            this.save()
-                        }
-                        break
-                    }
-                }
-            } catch (e) {
-                // Chat.log(`§c[雷达] 加载 ${p} 失败: ${e}`)
-            }
-        }
-        return this.cache
-    }
-
-    /** 保存到本地文件 */
-    save() {
-        if (!this.cache) return
-        try {
-            const dir = this.path.substring(0, this.path.lastIndexOf('/'))
-            if (!FS.exists(dir)) FS.makeDir(dir)
-            FS.open(this.path).write(JSON.stringify(this.cache))
-        } catch (e) {
-            // Chat.log(`§c[雷达] 保存已去过记录失败: ${e} ${this.path}`)
-        }
-    }
-
-    /**
-     * 获取某维度某区块的记录时间戳
-     * @param {string} dim
-     * @param {string} chunkKey "cx,cz"
-     * @returns {number?}
-     */
-    getTime(dim, chunkKey) { return this.load()[dim]?.[chunkKey] ?? null }
-
-    /**
-     * 切换某维度某区块的已去过状态
-     * @param {string} dim
-     * @param {string} chunkKey
-     * @returns {boolean} 切换后的状态
-     */
-    toggle(dim, chunkKey) {
-        const cache = this.load()
-        if (!cache[dim]) cache[dim] = {}
-        let now
-        if (cache[dim][chunkKey] !== undefined) {
-            delete cache[dim][chunkKey]
-            now = false
-        } else {
-            cache[dim][chunkKey] = Date.now()
-            now = true
-        }
-        this.save()
-        return now
-    }
-}
-
-/** 雷达标记：管理光标周边区块的注册状态渲染 */
-class RadarMarker {
-    static utils = DeobfRef.Type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
-    static settings = DeobfRef.Type('xaero.minimap.XaeroMinimap')?.instance?.getSettings()
-    static minimap = Java.type('xaero.hud.minimap.BuiltInHudModules').MINIMAP
-    /**
-     * @param {XaeroOverlayManager} overlay 渲染层管理器
-     * @param {DCAdvancement} adv 进度查询
-     * @param {VisitedStore} store 已去过存储
-     */
-    constructor(overlay, adv, store) {
-        /** @type {XaeroOverlayManager} */ this.overlay = overlay
-        /** @type {Map<string, object>} */ this.elements = new Map()
-        /** @type {DCAdvancement} */ this.adv = adv
-        /** @type {VisitedStore} */ this.store = store
-        /** @type {string?} */ this.lastSyncKey = null
-        /** @type {Draw2D} */ this.d2d = Hud.createDraw2D()
-        /** @type {boolean} 渲染开关 */
-        this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
-        /** @type {string} render方法名 */
-        this.render = DeobfRef.methodName(IMPORT.Renderable, 'render', 'method_25394', 'm_88315_')
-    }
-    /** 清空所有标记 */
-    clear() {
-        for (const [k, h] of this.elements) this.overlay.removeElement(h)
-        this.elements.clear()
-        this.lastSyncKey = null
-    }
-    /**
-     * 判断某区块的标记状态
-     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
-     * @param {number} cx
-     * @param {number} cz
-     * @param {string} dim
-     * @returns {{state:MarkerStateDef, isLarge:boolean}?} 状态 + 是否大型建筑；null=不显示
-     */
-    stateOf(entry, cx, cz, dim) {
-        const buildings = Array.from(entry.buildings())
-        if (buildings.length === 0) return null
-        const registered = this.adv.isDone(buildings[0])
-        const visited = this.store.getTime(dim, `${cx},${cz}`) != null
-        let state
-        if (registered && visited) state = MarkerState.REGISTERED_VISITED
-        else if (registered && !visited) state = MarkerState.REGISTERED_UNVISITED
-        else if (!registered && visited) state = MarkerState.UNREGISTERED_VISITED
-        else state = MarkerState.UNREGISTERED_UNVISITED
-        return { state, isLarge: entry.name().startsWith('multi_') }
-    }
-    /**
-     * @param {boolean} isLarge
-     * @param {MarkerStateDef} state 已算好的状态（由 rebuild 传入）
-     * @returns {Function}
-     */
-    makeRender(isLarge, state) {
-        const self = this
-        return JavaWrapper.methodToJava((args) => {
-            try {
-                const [graphics, e, info, localX, localY, scale, isWorldMap, hovered] = args
-                const tex = isLarge ? state.largeTexture : state.texture
-                if (!tex) return false
-                let mapSize = RadarMarker.minimap.getCurrentSession().getProcessor().getMinimapSize()
-                const isLocked = (RadarMarker.utils?.getEffectiveNorthLocked(mapSize / 2, 0))
-                    || (RadarMarker.settings?.getLockNorth &&
-                        RadarMarker.settings.getLockNorth(mapSize / 2, RadarMarker.settings.minimapShape))
-                const half = (e.size / 2) * scale
-                const deg = isWorldMap ? 0 : isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
-                const img = self.d2d.imageBuilder()
-                    .fromCustomImage(tex).alpha(isWorldMap ? 200 : 180)
-                    .pos((localX - half) | 0, (localY - half) | 0)
-                    .size(Math.max(2, (half * 2) | 0), Math.max(2, (half * 2) | 0))
-                    .rotation(deg).rotateCenter(true)
-                    .build()
-                img[self.render](graphics, 0, 0, 0)
-            } catch (err) { mclog(`[地图渲染管线] ${err}]`, 12) }
-            return true
-        })
-    }
-    /**
-     * 同步 element 列表到指定中心区块周边
-     * @param {number} ccx 中心区块 X
-     * @param {number} ccz 中心区块 Z
-     * @param {string} dim
-     * @param {boolean} force 强制重建
-     * @param {number} radius 重建半径
-     */
-    rebuild(ccx, ccz, dim, force = false, radius) {
-        adv.loads()
-        const syncKey = `${dim}|${ccx},${ccz}`
-        if (!force && syncKey === this.lastSyncKey) return
-        this.lastSyncKey = syncKey
-
-        if (!this.enabled) return this.clear()
-        if (force) {
-            for (const [k, h] of this.elements) this.overlay.removeElement(h)
-            this.elements.clear()
-        }
-        /** @type {Map<string, {entry:any, isLarge:boolean}>} */
-        const want = new Map()
-        const level = getClientLevel()
-        let RADIUS = radius ?? MARKER_RADIUS
-        for (let dx = -RADIUS; dx <= RADIUS; dx++) {
-            for (let dz = -RADIUS; dz <= RADIUS; dz++) {
-                const cx = ccx + dx
-                const cz = ccz + dz
-                const k = `${cx},${cz}`
-                let entry = ClientMapData.getPaletteEntry(level, new ChunkPos(cx, cz))
-                if (!entry) continue
-                const st = this.stateOf(entry, cx, cz, dim)
-                if (!st) continue
-                want.set(k, { entry, isLarge: st.isLarge, state: st.state })
-            }
-        }
-        // 移除不在 want 的
-        for (const [k, h] of Array.from(this.elements)) {
-            if (!want.has(k)) {
-                this.overlay.removeElement(h)
-                this.elements.delete(k)
-            }
-        }
-        // 添加新增的
-        for (const [k, { entry, isLarge, state }] of want) {
-            if (this.elements.has(k)) continue
-            const [cx, cz] = k.split(',').map(Number)
-            const size = isLarge ? 16 : 14
-            const el = this.overlay.addElement(cx, cz, state.color, size, isLarge, this.makeRender(isLarge, state))
-            this.elements.set(k, el)
-        }
-    }
-    /** 切换开关 */
-    toggle() {
-        this.enabled = !this.enabled
-        GlobalVars.putBoolean(`${scriptName}:Hightlight`, this.enabled)
-        if (!this.enabled) this.clear()
-        return this.enabled
-    }
-}
-
-/** tooltip 构建器 */
-class RadarTooltip {
-    /** @param {DCAdvancement} adv @param {VisitedStore} store */
-    constructor(adv, store) {
-        /** @type {DCAdvancement} */ this.adv = adv
-        /** @type {VisitedStore} */ this.store = store
-    }
-
-    /**
-     * 构建带雷达数据的 tooltip
-     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
-     * @param {number} cx @param {number} cz @param {string} dim
-     * @returns {string[]}
-     */
-    build(entry, cx, cz, dim) {
-        /** @type {string[]} */
-        const lines = []
-        const buildings = Array.from(entry.buildings())
-        if (buildings.length === 0) return lines
-
-        let name = entry.name()
-        const localized = Chat.createTextHelperFromTranslationKey(entry.translatableKey()).getString().trim()
-        if (localized && localized !== entry.translatableKey()) name = localized
-
-        lines.push(`§e${name} §7(${entry.name()})`)
-        lines.push(`§7区块: §f${cx}, ${cz}`)
-
-        const registered = this.adv.isDone(buildings[0])
-        const visited = this.store.getTime(dim, `${cx},${cz}`) != null
-        lines.push(`§7收集: ${registered ? '§a已注册' : '§c未注册'}`)
-        lines.push(`§7去过: ${visited ? '§a已去过' : '§c未去过'}`)
-
-        lines.push(visited ? `§8Shift+左键 取消标记` : `§8Shift+左键 标记去过`)
-        if (JEIAPI.inited)
-            lines.push(`§8Alt+左键    ${JEIAPI.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`)
-        // for (let i of buildings) lines.push(`${i}`)
-
-        return lines
-    }
-    /**
-     * 构建无雷达数据但已去过的简化 tooltip
-     * @param {number} cx @param {number} cz
-     * @param {number} visitedTime 时间戳
-     * @returns {string[]}
-     */
-    buildVisitedOnly(cx, cz, visitedTime) {
-        const timeStr = new Date(visitedTime).toLocaleString()
-        return [
-            `§a✔ 已去过 §7(${timeStr})`,
-            `§7区块: §f${cx}, ${cz}`,
-            `§8Shift+左键 取消标记`,
-        ]
-    }
-}
-
+/** JEI ALI战利品信息 */
 const JEIAPI = {
-    path: 'data/ali_chest_loot.json',
-    recipes: [],
-    localRecipes: {},
-    inited: false,
+    path: 'data/ali_chest_loot.json', recipes: [], localRecipes: {}, inited: false,
     init() {
-        this.jei = DeobfRef.Type('mezz.jei.common.Internal')?.getJeiRuntime()
-        this.typeId = new Identifier('ali', 'chest_loot')
+        this.jei = DeobfRef.type('mezz.jei.common.Internal')?.getJeiRuntime()
+        this.typeId = new ResourceLocation('ali', 'chest_loot')
         if (!this.jei) return // 未安装JEI
         this.recipeManager = this.jei.getRecipeManager()
         this.recipesGui = this.jei.getRecipesGui()
@@ -1442,24 +1062,24 @@ const JEIAPI = {
         }
         return false
     },
-    collect(n, out) {
-        if (!n) return
-        if (/ItemNode|ItemStackNode/.test(Reflection.getClassName(n))) {
-            let bounds = n.getCount().bounds()
-            for (let v of n.getItems()) {
+    collect(node, outarr) {
+        if (!node) return
+        if (/ItemNode|ItemStackNode/.test(Reflection.getClassName(node))) {
+            let bounds = node.getCount().bounds()
+            for (let v of node.getItems()) {
                 let it = new ItemStackHelper(v)
                 let enchants = Array.from(it.getEnchantments())
-                out.push({
+                outarr.push({
                     id: it.getItemId(),
                     name: it.getName().getString() + (enchants.length == 0 ? '' :
                         `[${enchants.map(v => v.getLevelName(v.getLevel())).join(', ')}]`),
-                    chance: n.getChance(),
+                    chance: node.getChance(),
                     min: bounds.lo(), max: bounds.hi()
                 })
             }
-        } else if (n.nodes)
-            for (const c of n.nodes())
-                this.collect(c, out)
+        } else if (node.nodes)
+            for (const c of node.nodes())
+                this.collect(c, outarr)
     },
     simplify(entry) {
         let map = new Map(), items = {}
@@ -1504,7 +1124,7 @@ const JEIAPI = {
         for (let i = 0; i < this.recipes.length; i++) {
             let r = this.recipes[i].type(), id = `${r.id()}`
             if (!/deceasedcraft:/.test(id)) continue
-            let name = Chat.createTextHelperFromTranslationKey(id.replace('deceasedcraft:', 'ali/loot_table/')).getString()
+            let name = utils.transkey(id.replace('deceasedcraft:', 'ali/loot_table/'))
             let outputs = {}
             for (let v of r.outputs()) {
                 let it = new ItemStackHelper(v)
@@ -1514,25 +1134,379 @@ const JEIAPI = {
             for (let k in items)
                 if (!items[k].name)
                     items[k].name = outputs[k] || null
-
             result[id] = { name, items }
         }
         if (Object.keys(result).length > 0) {
             FS.open(this.path).write(JSON.stringify(result, null, 4))
-            Chat.actionbar(`已保存${Object.keys(result).length}条配方到${this.path}`)
+            mclog(`已保存${Object.keys(result).length}条配方到${this.path}`)
         }
+    },
+    priorityKeys: ['nameless_trinkets', 'artifacts', 'tacz', 'legendarysurvivaloverhaul', 'secruitycraft'],
+    pretty() {
+        /** @type {Record<string,Set<string>>} */
+        let map = {}
+        for (let k of Object.keys(this.localRecipes))
+            if (ids.some(x => `${k}`.startsWith(x))) {
+                let v = this.localRecipes[k]
+                for (let ik of Object.keys(v.items)) {
+                    let iv = v.items[ik]
+                    let [namespace, path] = ik.split(':')
+                    map[namespace] ??= new Set()
+                    let chance = [iv.chance].flat(2).map(z => (z * 100).toFixed(2) + '%').join(',')
+                    map[namespace].add(`    §8- §f${iv.name}§f: ${iv.count} (${chance})`)
+                }
+            }
+        return Object.entries(map).sort((a, b) => {
+            let keyA = a[0], keyB = b[0]
+            let isPriorityA = this.priorityKeys.includes(keyA), isPriorityB = this.priorityKeys.includes(keyB)
+            if (isPriorityA && !isPriorityB) return -1 // 如果 A 是优先，B 不是，A 排前面（返回 -1）
+            if (!isPriorityA && isPriorityB) return 1 // 如果 B 是优先，A 不是，B 排前面（返回 1）
+            return keyA.localeCompare(keyB)  // 如果都不是优先，或者都是优先，则按照字母序排
+        }).map(([k, v]) => [`§7[§6${k}§7]`, ...Array.from(v).sort()]).flat()
+    }
+}
+const LootrPanel = {
+    title: null, list: [], page: 1, step: 28,
+    reset() { this.title = null, this.list = [], this.page = 1 },
+    total() { return Math.ceil(this.list.length / this.step) },
+    prevpage() { this.page = Math.max(1, this.page - 1) },
+    nextpage() { this.page = Math.min(this.total(), this.page + 1) },
+    current() {
+        let total = this.total()
+        let res
+        if (total > 1) {
+            let start = (this.page - 1) * this.step
+            res = this.list.slice(start, start + this.step)
+            res.push(` §8← §7[A] 第 ${this.page} 页 / 共 ${total} 页 [D] →§8 `)
+        } else res = [...this.list]
+        res.unshift(this.title)
+        return res
+    }
+}
+
+/** 已去过区块存储 */
+class VisitedStore {
+    /**
+     * @param {string|string[]|() => string|string[]} readPaths 读取路径（按优先级）
+     * @param {string|() => string} [writePath] 写入路径；不传则用读取路径第一个
+     */
+    constructor(readPaths, writePath) {
+        /** @type {string|string[]|() => string|string[]} */ this._readPaths = readPaths
+        /** @type {string|() => string|undefined} */ this._writePath = writePath
+        /** @type {Object<string, Object<string, number>>?} 维度 → { 区块key: 时间戳 } */
+        this.cache = null
+    }
+    /** @returns {string[]} 读取路径列表（按优先级） */
+    get readPaths() {
+        let v = typeof this._readPaths == 'function' ? this._readPaths() : this._readPaths
+        return Array.isArray(v) ? v : [v]
+    }
+    /** @returns {string} 写入路径 */
+    get path() {
+        let p = this._writePath ?? this._readPaths
+        return typeof p == 'function' ? p() : (Array.isArray(p) ? p[0] : p)
+    }
+    /** 从本地文件加载 @returns {Object<string, Object<string, number>>} */
+    load() {
+        if (this.cache) return this.cache
+        this.cache = {}
+        for (let p of this.readPaths) {
+            if (FS.exists(p)) {
+                let raw = FS.open(p).read()
+                if (raw && raw.length > 0) {
+                    this.cache = JSON.parse(raw)
+                    if (p !== this.path && Object.keys(this.cache).length > 0) {
+                        mclog(`迁移记录 §a${p} §7→ §a${this.path}`)
+                        this.save()
+                    }
+                    break
+                }
+            }
+        }
+        return this.cache
+    }
+    /** 保存到本地文件 */
+    save() {
+        if (!this.cache) return
+        try {
+            let dir = this.path.substring(0, this.path.lastIndexOf('/'))
+            if (!FS.exists(dir)) FS.makeDir(dir)
+            FS.open(this.path).write(JSON.stringify(this.cache))
+        } catch (e) {
+            mclog(`§c[雷达] 保存已去过记录失败: ${e} ${this.path}`)
+        }
+    }
+    /**
+     * 获取某维度某区块的记录时间戳
+     * @param {string} dim
+     * @param {string} chunkKey "cx,cz"
+     * @returns {number?}
+     */
+    getTime(dim, chunkKey) { return this.load()[dim]?.[chunkKey] ?? null }
+    /**
+     * 切换某维度某区块的已去过状态
+     * @param {string} dim
+     * @param {string} chunkKey
+     * @returns {boolean} 切换后的状态
+     */
+    toggle(dim, chunkKey) {
+        const cache = this.load()
+        if (!cache[dim]) cache[dim] = {}
+        let now
+        if (cache[dim][chunkKey] !== undefined) {
+            delete cache[dim][chunkKey]
+            now = false
+        } else {
+            cache[dim][chunkKey] = Date.now()
+            now = true
+        }
+        this.save()
+        return now
+    }
+}
+
+/** 标记状态（附带纹理初始化） */
+const MarkerState = {
+    /** @typedef {{color:number, texture:CustomImage?, largeTexture:CustomImage?}} MarkerStateDef 标记状态定义 */
+    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null, largeTexture: null },
+    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null, largeTexture: null },
+    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null, largeTexture: null },
+    REGISTERED_VISITED: { color: 0x44FF44, texture: null, largeTexture: null },
+    /** 预创建所有标记纹理（区分大小建筑） */
+    init() {
+        for (const [name, state] of Object.entries(this)) {
+            if (typeof state !== 'object' || !('color' in state)) continue
+            // 小建筑
+            state.texture = Hud.createTexture(16, 16, `lostradar_marker_${name}`)
+                .setGraphicsColor(0x000000).fillRect(0, 0, 16, 16)
+                .setGraphicsColor(state.color).drawRoundRect(-1, -1, 17, 17, 8, 8)
+                .drawRoundRect(1, 1, 13, 13, 16, 16)
+                .update()
+            // 大建筑
+            state.largeTexture = Hud.createTexture(16, 16, `lostradar_marker_large_${name}`)
+                .setGraphicsColor(0x000000).fillRect(0, 0, 15, 15)
+                .setGraphicsColor(state.color).drawRoundRect(0, 0, 15, 15, 16, 16)
+                .drawRect(0, 0, 15, 15)
+                .update()
+        }
+    },
+    /**
+     * 读取配置文件
+     * @param {string} biomeId 群系
+     * @returns {string} 标签
+     */
+    getBiomelargeImageKey(biomeId) {
+        let path = file.getParent().replace(/config\\jsMacros.+/, 'config\\craftpresence.json')
+        if (!FS.exists(path)) return null
+        let data = JSON.parse(FS.open(path).read())
+        let biomeData = data?.biomeSettings?.biomeData
+        return biomeData[`${biomeId}`.split(':')[1]]?.data?.largeImageKey
+    }
+}
+
+/** 雷达标记：管理光标周边区块的注册状态渲染 */
+class RadarMarker {
+    static ClientUtils = DeobfRef.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static Settings = DeobfRef.type('xaero.minimap.XaeroMinimap')?.instance?.getSettings()
+    static Minimap = Java.type('xaero.hud.minimap.BuiltInHudModules').MINIMAP
+    /**
+     * @param {XaeroOverlayManager} overlay 渲染层管理器
+     * @param {VisitedStore} store 已去过存储
+     */
+    constructor(overlay, store) {
+        /** @type {XaeroOverlayManager} */ this.overlay = overlay
+        /** @type {Map<string, object>} */ this.elements = new Map()
+        /** @type {VisitedStore} */ this.store = store
+        /** @type {string?} */ this.lastSyncKey = null
+        /** @type {Draw2D} */ this.d2d = Hud.createDraw2D()
+        /** @type {boolean} 渲染开关 */
+        this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
+        /** @type {string} render方法名 */
+        this.render = DeobfRef.methodName(ModImport.Renderable, 'render', 'method_25394', 'm_88315_')
+    }
+    /** 清空所有标记 */
+    clear() { this.overlay.clear(); this.elements.clear(); this.lastSyncKey = null }
+    /** 切换开关 */
+    toggle() {
+        this.enabled = !this.enabled
+        GlobalVars.putBoolean(`${scriptName}:Hightlight`, this.enabled)
+        if (!this.enabled) this.clear()
+        return this.enabled
+    }
+    /**
+     * 判断某区块的标记状态
+     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
+     * @param {number} cx
+     * @param {number} cz
+     * @param {string} dim
+     * @returns {{state:MarkerStateDef, isLarge:boolean, level:number, temp: number}?}
+     */
+    stateOf(entry, cx, cz, dim) {
+        let buildings = Array.from(entry.buildings())
+        if (buildings.length === 0) return null
+        let registered = DCAdvancement.isDone(buildings[0])
+        let visited = this.store.getTime(dim, `${cx},${cz}`) != null
+        // 获取区域级别
+        let iconKey = `${entry.iconU()}_${entry.iconV()}`
+        let regionInfo = RadarTooltip.ICON_MAP[iconKey]
+        let state = registered
+            ? visited ? MarkerState.REGISTERED_VISITED : MarkerState.REGISTERED_UNVISITED
+            : visited ? MarkerState.UNREGISTERED_VISITED : MarkerState.UNREGISTERED_UNVISITED
+        return {
+            state, isLarge: entry.name().startsWith('multi_'),
+            level: regionInfo ? regionInfo.level : 0,
+            temp: regionInfo.temp ?? 0
+        }
+    }
+    /**
+     * @param {boolean} isLarge 是否大型建筑
+     * @param {MarkerStateDef} state 已算好的状态（由 rebuild 传入）
+     * @param {number} temp 寒热
+     * @param {number} level 级别
+     * @returns {Function}
+     */
+    makeRender(isLarge, state, level, temp) {
+        const self = this
+        return JavaWrapper.methodToJava((args) => {
+            try {
+                const [graphics, e, info, localX, localY, scale, isWorldMap, hovered] = args
+                const RomanNumber = ['', 'I', 'II', 'III', 'IV', 'V']
+                const tex = isLarge ? state.largeTexture : state.texture
+                if (!tex) return false
+
+                let mapSize = RadarMarker.Minimap.getCurrentSession().getProcessor().getMinimapSize()
+                let shape = RadarMarker.Settings.minimapShape
+                let isLocked = (RadarMarker.ClientUtils?.getEffectiveNorthLocked(mapSize / 2, 0))
+                    || (RadarMarker.Settings?.getLockNorth && RadarMarker.Settings.getLockNorth(mapSize / 2, shape))
+                let half = (e.size / 2) * scale
+                let deg = isWorldMap ? 0 : isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
+
+                let img = self.d2d.imageBuilder()
+                    .fromCustomImage(tex).alpha(isWorldMap ? 200 : 180)
+                    .pos((localX - half) | 0, (localY - half) | 0)
+                    .size(Math.max(2, (half * 2) | 0), Math.max(2, (half * 2) | 0))
+                    .rotation(deg).rotateCenter(true)
+                    .build()
+                img[self.render](graphics, 0, 0, 0)
+                if (level > 0) {
+                    let textColor = [0x0078d4, 0x00b294, 0xd83b01][temp + 1]
+                    let text = self.d2d.textBuilder().text(RomanNumber[level])
+                        .color(textColor).scale(scale * (isLarge ? 1 : 0.8))
+                        .build().align(img, 'CenterOnCenter', 'CenterOnCenter')
+                    text[self.render](graphics, 0, 0, 0)
+                }
+            } catch (err) { mclog(`[地图渲染管线] ${err}]`, 12) }
+            return true
+        })
+    }
+    /**
+     * 同步 element 列表到指定中心区块周边
+     * @param {number} ccx 中心区块 X
+     * @param {number} ccz 中心区块 Z
+     * @param {string} dim
+     * @param {boolean} force 强制重建
+     * @param {number} radius 重建半径
+     */
+    rebuild(ccx, ccz, dim, force = false, radius) {
+        DCAdvancement.loads()
+        let syncKey = `${dim}|${ccx},${ccz}`
+        if (!force && syncKey === this.lastSyncKey) return
+        this.lastSyncKey = syncKey
+
+        if (!this.enabled) return this.clear()
+        if (force)
+            this.overlay.clear(), this.elements.clear()
+        /** @type {Map<string, {entry:any, isLarge:boolean, state:any, searched:boolean, level:number}>} */
+        let want = new Map()
+        let clientLevel = utils.level()
+        let RADIUS = radius ?? MARKER_RADIUS
+        for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+            for (let dz = -RADIUS; dz <= RADIUS; dz++) {
+                let cx = ccx + dx, cz = ccz + dz, k = `${cx},${cz}`
+                let entry = utils.getRadarData(cx, cz, clientLevel)
+                if (!entry) continue
+                let st = this.stateOf(entry, cx, cz, dim)
+                if (!st) continue
+                want.set(k, { entry, isLarge: st.isLarge, state: st.state, level: st.level, temp: st.temp })
+            }
+        }
+        // 移除不在 want 的
+        for (let [k, h] of Array.from(this.elements)) {
+            if (!want.has(k)) {
+                this.overlay.remove(h)
+                this.elements.delete(k)
+            }
+        }
+        // 添加新增的
+        for (let [k, { entry, isLarge, state, level, temp }] of want) {
+            if (this.elements.has(k)) continue
+            let [cx, cz] = k.split(',').map(Number)
+            let size = isLarge ? 16 : 14
+            let el = this.overlay.add(cx, cz, state.color, size, isLarge, this.makeRender(isLarge, state, level, temp))
+            this.elements.set(k, el)
+        }
+    }
+}
+
+/** tooltip 构建器 */
+class RadarTooltip {
+    static ICON_MAP = {
+        "0_0": { level: 1, temp: 0, id: "suburb_residential", name: '§a郊区住宅群§8 | §a🍃§8 | §a🌡温暖' },
+        "32_0": { level: 2, temp: 1, id: "highrise_office", name: '§c摩天办公区§8 | §c🔥🔥§8 | §c🌡炎热' },
+        "64_0": { level: 2, temp: -1, id: "highrise_residential", name: '§9摩天住宅区§8 | ❄️❄️§8 | §9🌡寒冷' },
+        "96_0": { level: 3, temp: 1, id: "highrise_hotel", name: '§c摩天酒店区§8 | §c🔥🔥🔥§8 | §c🌡炽热难耐' },
+        "128_0": { level: 3, temp: -1, id: "retail_district", name: '§9零售商业区§8 | §9❄️❄️❄️§8 | §9🌡严寒刺骨' },
+        "-1_-1": { level: 4, temp: 1, id: "wasteland", name: '§c荒地§8 | §c☢️☢️☢️☢️§8 | §c🌡辐射警告' }
+    }
+    /** @param {VisitedStore} store */
+    constructor(store) { /** @type {VisitedStore} */ this.store = store }
+    /**
+     * 构建带雷达数据的 tooltip
+     * @param {mcjty.lostradar.data.MapPalette$PaletteEntry} entry
+     * @param {number} cx @param {number} cz @param {string} dim
+     * @returns {string[]}
+     */
+    build(entry, cx, cz, dim) {
+        /** @type {string[]} */
+        const lines = []
+        const buildings = Array.from(entry.buildings())
+        if (buildings.length === 0) return lines
+
+        let name = entry.name()
+        let localized = utils.transkey(entry.translatableKey())
+        if (localized && localized !== entry.translatableKey()) name = localized
+        let region = RadarTooltip.ICON_MAP[`${entry.iconU()}_${entry.iconV()}`]
+        let registered = DCAdvancement.isDone(buildings[0])
+        let visited = this.store.getTime(dim, `${cx},${cz}`) != null
+
+        lines.push(`§e${name} §7(${entry.name()})`)
+        if (region) lines.push(` §8-§7 区域: ${region.name}`)
+        lines.push(` §8-§7 收集: ${registered ? '§a已注册' : '§c未注册'}`)
+        lines.push(` §8-§7 去过: ${visited ? '§a已去过' : '§c未去过'}`)
+        lines.push((visited ? `§8[Shift+左键] 取消标记` : `§8[Shift+左键] 标记去过`)
+            + (!JEIAPI.inited ? '' : ` §8[Alt+左键] ${JEIAPI.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`))
+        return lines
+    }
+    /**
+     * 构建无雷达数据但已去过的简化 tooltip
+     * @param {number} cx @param {number} cz
+     * @param {number} visitedTime 时间戳
+     * @returns {string[]}
+     */
+    buildVisitedOnly(cx, cz, visitedTime) {
+        const timeStr = new Date(visitedTime).toLocaleString()
+        return [` §8-§7 去过: §7(${timeStr})`, ` §8-§7 区块: §f${cx}, ${cz}`, `§8[Shift+左键] 取消标记`]
     }
 }
 
 function main() {
     overlay = new XaeroOverlayManager().register()
-    marker = new RadarMarker(overlay, adv, visitedStore)
+    marker = new RadarMarker(overlay, visitedStore)
 
     // 从当前玩家位置初始化一次
-    const pk = getPlayerChunkKey()
+    let pk = utils.getChunkKey()
     if (pk) {
-        const [pcx, pcz] = pk.split(',').map(Number)
-        const dim = World.getDimension()
+        let [pcx, pcz] = pk.split(',').map(Number), dim = World.getDimension()
         marker.rebuild(pcx, pcz, dim)
     }
 
@@ -1541,15 +1515,13 @@ function main() {
         bus.remove(filter_listener)
         tipDraw = null
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
-            adv.loads()
-            const guimap = new WorldMap(screen)
-            // ==================== tooltip 专用画布（独立于标记开关） ====================
-            const tipRegion = {
+            DCAdvancement.loads()
+            let guimap = new WorldMap(screen)
+            let tipRegion = {
                 x: 0, y: 0,
                 width: guimap.width || (Hud.getWindowWidth() / Hud.getScaleFactor()),
                 height: guimap.height || (Hud.getWindowHeight() / Hud.getScaleFactor())
             }
-
             tipDraw = new Draw2DUtils(tipRegion, (self, drawContext) => {
                 try {
                     if (!drawContext) return
@@ -1557,14 +1529,14 @@ function main() {
                     const cz = Math.floor(guimap.mouseBlockPosZ / 16)
                     const dim = World.getDimension()
                     let lines = []
-                    let entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                    let entry = utils.getRadarData(cx, cz)
                     if (entry) {
                         lines = radarTooltip.build(entry, cx, cz, dim)
                     } else {
                         const vt = visitedStore.getTime(dim, `${cx},${cz}`)
                         if (vt != null) lines = radarTooltip.buildVisitedOnly(cx, cz, vt)
                     }
-                    self.tooltips = [{ tips: lines }, { x: 20, y: 30, tips: lootr.current() }]
+                    self.tooltips = [{ tips: lines }, { x: 20, y: 30, tips: LootrPanel.current() }]
                 } catch (err) { mclog(`[Draw2D渲染管线] ${err}`, 12) }
             })
             screen.addDraw2D(tipDraw.target, 0, 0, tipRegion.width, tipRegion.height)
@@ -1574,111 +1546,63 @@ function main() {
             let tick_counter = 0
 
             filter_listener = bus.addListener(event => {
-                const pressedKeys = event.keys
+                let pressedKeys = event.keys
                 if (pressedKeys.length == 0 && ++tick_counter % 3 !== 0) return
                 tick_counter = 0
-
                 // 读鼠标区块
-                const mx = guimap.mouseBlockPosX
-                const mz = guimap.mouseBlockPosZ
-                const cx = Math.floor(mx / 16)
-                const cz = Math.floor(mz / 16)
-                const key = `${cx},${cz}`
-                const dim = World.getDimension()
-
+                let cx = guimap.mouseBlockPosX >> 4, cz = guimap.mouseBlockPosZ >> 4
+                let key = `${cx},${cz}`, dim = World.getDimension()
                 // ---- H 键：切换标记渲染 ----
-                if (event.click(Event.KEY_H)) {
-                    const on = marker.toggle()
-                    mclog(on ? '标记渲染 §a开启' : '标记渲染 §c关闭')
-                    if (on) marker.rebuild(cx, cz, dim, true)
-                }
-
-                if (event.click(Event.LEFTCLICK)) {
+                if (event.click(Event.KEY_H)) { marker.toggle() && marker.rebuild(cx, cz, dim, true) }
+                else if (event.click('key.keyboard.a')) { LootrPanel.prevpage() }
+                else if (event.click('key.keyboard.d')) { LootrPanel.nextpage() }
+                else if (event.click(Event.LEFTCLICK)) {
                     if (pressedKeys.includes(Event.ALT)) {
                         // ---- Alt+左键：切换到战利品页面 ----
-                        const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
+                        let entry = utils.getRadarData(cx, cz)
                         if (entry) {
-                            const buildings = Array.from(entry.buildings())
+                            let buildings = Array.from(entry.buildings())
                             if (buildings.length > 0) {
                                 let ids = buildings.map(x => `${x}`.replace(entry.name(), 'chests') + '/')
                                 if (!JEIAPI.show((v) => ids.some(x => `${v}`.startsWith(x)))
                                     && Object.keys(JEIAPI.localRecipes).length > 0) {
-                                    /** @type {Record<string,Set<string>>} */
-                                    let map = {}
-                                    for (let k of Object.keys(JEIAPI.localRecipes))
-                                        if (ids.some(x => `${k}`.startsWith(x))) {
-                                            let v = JEIAPI.localRecipes[k]
-                                            for (let ik of Object.keys(v.items)) {
-                                                let iv = v.items[ik]
-                                                let [namespace, path] = ik.split(':')
-                                                map[namespace] ??= new Set()
-                                                map[namespace].add(`    §8- §f${iv.name}§f: ${iv.count} (${[iv.chance].flat(2).map(z => (z * 100).toFixed(2) + '%').join(',')})`)
-                                            }
-                                        }
-                                    let trans = Chat.createTextHelperFromTranslationKey(entry.translatableKey()).getString().trim()
-                                    lootr.reset()
-                                    lootr.title = `§6战利品信息: ${trans}`
-                                    const priorityKeys = ['nameless_trinkets', 'artifacts', 'tacz', 'legendarysurvivaloverhaul', 'secruitycraft']
-                                    lootr.list = Object.entries(map)
-                                        .sort((a, b) => {
-                                            const keyA = a[0], keyB = b[0];
-                                            const isPriorityA = priorityKeys.includes(keyA)
-                                            const isPriorityB = priorityKeys.includes(keyB)
-                                            // 如果 A 是优先，B 不是，A 排前面（返回 -1）
-                                            if (isPriorityA && !isPriorityB) return -1
-                                            // 如果 B 是优先，A 不是，B 排前面（返回 1）
-                                            if (!isPriorityA && isPriorityB) return 1
-                                            // 如果都不是优先，或者都是优先，则按照字母序排
-                                            return keyA.localeCompare(keyB)
-                                        })
-                                        .map(([k, v]) => [`§7[§6${k}§7]:`, ...Array.from(v).sort()])
-                                        .flat()
+                                    LootrPanel.reset()
+                                    LootrPanel.title = `§6战利品信息: ${utils.transkey(entry.translatableKey())}`
+                                    LootrPanel.list = JEIAPI.pretty()
                                 }
                             }
                         }
                     } else if (pressedKeys.includes(Event.SHIFT)) {
                         // ---- Shift+左键：切换已去过状态 ----
-                        if (markChunkAt(cx, cz, dim, true)) {
-                            last_key = null
-                            marker.rebuild(cx, cz, dim, true)
-                        }
-                    } else {
-                        lootr.reset()
-                    }
-                } else if (event.click('key.keyboard.a')) {
-                    lootr.prevpage()
-                } else if (event.click('key.keyboard.d')) {
-                    lootr.nextpage()
+                        if (utils.markChunkAt(cx, cz, dim, true))
+                            last_key = null, marker.rebuild(cx, cz, dim, true)
+                    } else LootrPanel.reset()
                 }
 
                 // ---- 鼠标换区块：重建周边 element ----
-                if (key !== last_key) {
-                    last_key = key
-                    marker.rebuild(cx, cz, dim)
-                }
+                if (key !== last_key)
+                    last_key = key, marker.rebuild(cx, cz, dim)
             })
         }
     }))
     interact_listener = JsMacros.on("InteractBlock", JavaWrapper.methodToJava((e, ctx) => {
-        try {
-            const id = `${e.block.getId()}`
-            const catalog = 'deceasedcraft:building_catalog'
-            const mainHand = Player.getPlayer().getMainHand().getItemId()
-            const pos = e.block.getBlockPos()
-            const cx = pos.getX() >> 4
-            const cz = pos.getZ() >> 4
-            const dim = World.getDimension()
-            if (mainHand == catalog || /lootr_/.test(id)) {
-                markChunkAt(cx, cz, dim, false, true)
-                const entry = ClientMapData.getPaletteEntry(getClientLevel(), new ChunkPos(cx, cz))
-                if (entry) {
-                    const buildings = Array.from(entry.buildings())
-                    if (buildings.length > 0 && !adv.isDone(buildings[0]))
-                        mclog('此建筑尚未注册')
-                }
-                marker?.rebuild(cx, cz, dim, true, 5)
+        let id = `${e.block.getId()}`
+        let catalog = 'deceasedcraft:building_catalog'
+        let mainHand = Player.getPlayer().getMainHand().getItemId()
+        let pos = e.block.getBlockPos()
+        let cx = pos.getX() >> 4
+        let cz = pos.getZ() >> 4
+        let dim = World.getDimension()
+        if (mainHand == catalog || /lootr_/.test(id)) {
+            utils.markChunkAt(cx, cz, dim, false, true)
+            let entry = utils.getRadarData(cx, cz)
+            if (entry) {
+                let buildings = Array.from(entry.buildings())
+                if (buildings.length > 0 && !DCAdvancement.isDone(buildings[0]))
+                    mclog('此建筑尚未注册')
             }
-        } catch (err) { mclog(`[开箱标记] ${err}`, 12) }
+            marker?.rebuild(cx, cz, dim, true, 5)
+        }
     }))
 }
 
@@ -1693,7 +1617,6 @@ function teardown() {
 /** 渲染半径（区块） */
 const MARKER_RADIUS = 30
 const bus = new EventBus()
-const adv = new DCAdvancement()
 const visitedStore = new VisitedStore(
     // 读取路径（按优先级：存档内新路径 → 带存档 ID 旧路径 → 通用旧路径）
     () => {
@@ -1713,7 +1636,7 @@ const visitedStore = new VisitedStore(
         return FS.exists(saveDir) ? `${saveDir}/data/lostradar_visited.json` : `data/lostradar_visited_${id}.json`
     }
 )
-const radarTooltip = new RadarTooltip(adv, visitedStore)
+const radarTooltip = new RadarTooltip(visitedStore)
 // ==================== 主逻辑 ====================
 /** @type {string?} OpenScreen 监听 id */
 let screen_listener = null
@@ -1729,24 +1652,6 @@ let overlay = null
 let marker = null
 /** @type {Draw2DUtils?} tooltip 专用画布 */
 let tipDraw = null
-const lootr = {
-    title: null, list: [], page: 1, step: 28,
-    reset() { this.title = null, this.list = [], this.page = 1 },
-    total() { return Math.ceil(this.list.length / this.step) },
-    prevpage() { this.page = Math.max(1, this.page - 1) },
-    nextpage() { this.page = Math.min(this.total(), this.page + 1) },
-    current() {
-        let total = this.total()
-        let res
-        if (total > 1) {
-            let start = (this.page - 1) * this.step
-            res = this.list.slice(start, start + this.step)
-            res.push(` §8← §7[A] 第 ${this.page} 页 / 共 ${total} 页 [D] →§8 `)
-        } else res = [...this.list]
-        res.unshift(this.title)
-        return res
-    }
-}
 
 try {
     JsMacros.assertEvent(event, 'Service')
@@ -1761,7 +1666,7 @@ if (isEnabled()) {
     main()
     _listener.step = 5
     _listener.on(() => {
-        const playerKey = getPlayerChunkKey()
+        const playerKey = utils.getChunkKey()
         if (playerKey != null && playerKey !== last_player_key) {
             last_player_key = playerKey
             const [pcx, pcz] = playerKey.split(',').map(Number)

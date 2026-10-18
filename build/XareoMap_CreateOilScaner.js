@@ -4,6 +4,13 @@
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 调整缓存格式，油田关键参数也一同保存
 // 更新内容: v1.2 添加地图渲染管线，统一存储到存档目录下
+// 更新内容: v1.3 在服务器中可以自己填入种子，依照已记录地图的群系计算油田
+
+/**
+ * @type {number} 自定义种子，末尾要带n，防止长种子精度损失
+ * @description 仅在服务器中客户端会用该种子来计算油田数值，单人存档会自动获取种子
+ */
+const CUSTOM_SEED = 0n
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -676,14 +683,13 @@ class XaeroOverlayManager {
                 dcref.call(['renderDeferredElements', 'method_73199', 'drawDeferredElements', 'm_280637_'])
             } catch {
                 dcref.call(method, this.Font, components, Math.round(x), Math.round(y),
-                    Player.getPlayer().getMainHand().getRaw())
+                    Client.getRegistryManager().getItemStack('minecraft:air').getRaw())
             }
             stack.call(['popPose', 'method_22909', 'pop', 'm_85849_'])
         }
     }
 }
 
-// ==================== 油田标记状态 ====================
 /** 油田标记状态（按油量分档 + 未扫描） */
 const OilMarkerState = {
     LOW: { color: 0x44FF44, texture: null, label: '<25%' },
@@ -718,25 +724,23 @@ const OilMarkerState = {
                 Chat.log(`§c[油田] 纹理创建失败 ${name}: ${e}`)
             }
         }
+    },
+    /**
+     * 油量 → 档位
+     * @param {number} oil 油量 mB
+     * @param {number} max 100% 阈值
+     * @returns {OilMarkerStateDef}
+     */
+    stateOf(oil, max) {
+        if (oil >= 2147483647) return this.INFINITE
+        const ratio = oil / max
+        if (ratio < 0.25) return this.LOW
+        if (ratio < 0.50) return this.MID
+        if (ratio < 0.75) return this.HIGH
+        return this.FULL
     }
 }
 
-/**
- * 油量 → 档位
- * @param {number} oil 油量 mB
- * @param {number} max 100% 阈值
- * @returns {OilMarkerStateDef}
- */
-function oilStateOf(oil, max) {
-    if (oil >= 2147483647) return OilMarkerState.INFINITE
-    const ratio = oil / max
-    if (ratio < 0.25) return OilMarkerState.LOW
-    if (ratio < 0.50) return OilMarkerState.MID
-    if (ratio < 0.75) return OilMarkerState.HIGH
-    return OilMarkerState.FULL
-}
-
-// ==================== 油田标记渲染 ====================
 /** 油田标记：按区块油量绘制矩形纹理，含未扫描遮罩 */
 class OilMarker {
     static utils = Java.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
@@ -787,7 +791,7 @@ class OilMarker {
             if (!(k in chunkMap)) continue
             const oil = chunkMap[k]
             if (oil <= 0) continue
-            want.set(`${cx},${cz}`, { oil, state: oilStateOf(oil, max) })
+            want.set(`${cx},${cz}`, { oil, state: OilMarkerState.stateOf(oil, max) })
         }
 
         // 2. 未扫描遮罩
@@ -905,28 +909,69 @@ class WorldMap {
         /** @type {IScreen} */ this.raw = screen
         /** @type {Packages.org.joor.Reflect} */ this.target = Reflection.getReflect(screen)
     }
-    /** @returns {number} */
+    /** @returns {number} 屏幕宽（GUI 缩放坐标） */
     get width() { return this.raw.getWidth() }
-    /** @returns {number} */
+    /** @returns {number} 屏幕高（GUI 缩放坐标） */
     get height() { return this.raw.getHeight() }
-    /** @returns {number} */
+    /** @returns {number} 地图缩放比例 */
     get mapScale() { return this.target.get('scale') }
-    /** @returns {number} */
+    /** @returns {number} 地图缩放比例 */
+    get userScale() { return this.target.get('userScale') }
+    /** @returns {string} 鼠标所在维度 */
+    get mouseBlockDim() { return this.target.get('mouseBlockDim') }
+    /** @returns {number} 鼠标所在方块坐标 */
     get mouseBlockPosX() { return this.target.get('mouseBlockPosX') }
-    /** @returns {number} */
+    /** @returns {number} 鼠标所在方块坐标 */
+    get mouseBlockPosY() { return this.target.get('mouseBlockPosY') }
+    /** @returns {number} 鼠标所在方块坐标 */
     get mouseBlockPosZ() { return this.target.get('mouseBlockPosZ') }
-    /** @returns {number} */
+    /** @returns {number} 地图中心方块坐标 */
     get cameraX() { return this.target.get('cameraX') }
-    /** @returns {number} */
+    /** @returns {number} 地图中心方块坐标 */
     get cameraZ() { return this.target.get('cameraZ') }
-    /** @returns {number} */
+    /** @returns {MapProcessor} 地图进程 */
+    get mapProcessor() { return this.target.get('mapProcessor') }
+    /** @returns {int} 地图当前显示层级 */
+    get caveLayer() { return this.mapProcessor.getCurrentCaveLayer() }
+    /** @returns {ResourceKey<Biome>} 地图纹理群系 */
+    getBiomeFromTexture(caveLayer, x, z) {
+        let textureLevel = 0
+        let userScale = this.userScale
+        if (userScale < 1)
+            textureLevel = Math.min(Math.floor(Math.log(1 / userScale) / Math.log(2)), 3)
+        let leveledRegionShift = 9 + textureLevel
+        let mouseRegX = x >> leveledRegionShift, mouseRegZ = z >> leveledRegionShift
+        let reg = this.mapProcessor.getLeveledRegion(caveLayer, mouseRegX, mouseRegZ, textureLevel)
+        if (!reg || !reg.hasTextures()) return null
+
+        let maxRegBlockCoord = (1 << leveledRegionShift) - 1
+        let mouseRegPixelX = (x & maxRegBlockCoord) >> textureLevel
+        let mouseRegPixelZ = (z & maxRegBlockCoord) >> textureLevel
+        let debugTextureX = (x >> leveledRegionShift - 3) & 7
+        let debugTextureY = (z >> leveledRegionShift - 3) & 7
+
+        let tex = reg.getTexture(debugTextureX, debugTextureY)
+        if (!tex) return null;
+
+        let pixelInsideTexX = mouseRegPixelX & 63
+        let pixelInsideTexZ = mouseRegPixelZ & 63
+        return tex.getBiome(pixelInsideTexX, pixelInsideTexZ)
+    }
+
+    /** @returns {number} 每世界方块对应的屏幕像素 */
     scale() { return this.mapScale / Hud.getScaleFactor() }
-    /** @param {number} [length=1] @returns {number} */
+    /** 世界长度 → 屏幕像素 @param {number} [length=1] @returns {number} */
     toSize(length) { return (length ?? 1) * this.scale() }
-    /** @param {number} x @returns {number} */
+    /** 世界 X → 屏幕 X @param {number} x @returns {number} */
     toX(x) { return Math.round(this.width / 2 + this.toSize(x - this.cameraX)) }
-    /** @param {number} y @returns {number} */
+    /** 世界 Z → 屏幕 Y @param {number} y @returns {number} */
     toY(y) { return Math.round(this.height / 2 + this.toSize(y - this.cameraZ)) }
+    /** 世界长度 → 屏幕整数像素 @param {number} length @returns {number} */
+    toLength(length) { return Math.round(this.toSize(length ?? 1)) }
+    /** 鼠标屏幕 X @returns {number} */
+    mouseX() { return this.toX(this.mouseBlockPosX) }
+    /** 鼠标屏幕 Y @returns {number} */
+    mouseY() { return this.toY(this.mouseBlockPosZ) }
 }
 
 // ==================== 事件 ====================
@@ -1137,6 +1182,27 @@ const OilStore = {
 }
 
 // ==================== 油量查询 ====================
+const BiomeHelper = {
+    minecraft: null, registryAccess: null, BIOME: null, registry: null,
+    Registries: DeobfRef.Class(
+        'net.minecraft.core.registries.Registries', 'net.minecraft.class_7924',
+        'net.minecraft.registry.RegistryKeys', 'net.minecraft.src.C_256686_'),
+    getRegistryAccess() {
+        return new DeobfRef(this.minecraft.m_91403_()).call(
+            'registryAccess|method_29091|getRegistryManager|m_105152_'.split('|'))
+    },
+    getHolder(biomeid) {
+        this.minecraft ??= Client.getMinecraft()
+        this.registryAccess ??= this.getRegistryAccess()
+        this.BIOME ??= this.Registries.get('BIOME', 'field_41236', 'f_256952_')
+        this.registry ??= new DeobfRef(this.registryAccess).invoke(
+            DeobfRef.methodName('net.minecraft.core.RegistryAccess',
+                'registry', 'method_33310', 'getOptional', 'm_6632_'),
+            this.BIOME)?.orElse(null)
+        return new DeobfRef(this.registry).call(['getHolder', 'method_40264', 'getEntry', 'm_203636_'],
+            biomeid).orElse(null)
+    }
+}
 /** 油量查询核心 */
 const CDGOil = {
     /** @type {ServerLevel?} */
@@ -1149,14 +1215,18 @@ const CDGOil = {
     },
     /** @returns {ServerLevel} */
     getOverworld() {
-        const mc = Client.getMinecraft()
-        const server = Reflection
-            .getClass('net.minecraft.client.Minecraft').getDeclaredMethod('m_91092_').invoke(mc)
-        return Reflection
-            .getClass('net.minecraft.server.MinecraftServer').getDeclaredMethod('m_129783_').invoke(server)
+        try {
+            const mc = Client.getMinecraft()
+            const server = Reflection.getClass('net.minecraft.client.Minecraft')
+                .getDeclaredMethod('m_91092_').invoke(mc)
+            return Reflection.getClass('net.minecraft.server.MinecraftServer')
+                .getDeclaredMethod('m_129783_').invoke(server)
+        } catch {
+            return null
+        }
     },
     /** @returns {bigint} */
-    getSeed() { return new DeobfRef(this.level).call(['getSeed', 'method_8412', 'm_7328_']) },
+    getSeed() { return this.level ? new DeobfRef(this.level).call(['getSeed', 'method_8412', 'm_7328_']) : CUSTOM_SEED },
     /** @param {number} x @param {number} z @returns {Holder<Biome>} */
     getNoiseBiome(x, z) {
         return new DeobfRef(this.level).call(
@@ -1167,7 +1237,16 @@ const CDGOil = {
     getBaseOilAmount(x, z) { return OilChunksSavedData.getBaseOilAmount(this.level, new ChunkPos(x, z)) },
     /** @param {number} x @param {number} z @returns {number} */
     getBaseOilAmountFast(x, z) {
-        let biome = CDGOil.getNoiseBiome(x * 16, z * 16)
+        let biome
+        let cx = (x << 4) + 8, cz = (z << 4) + 8
+        if (this.level)
+            biome = CDGOil.getNoiseBiome(cx, cz)
+        else {
+            let worldmap = new WorldMap(Hud.getOpenScreen())
+            let biomeid = worldmap.getBiomeFromTexture(worldmap.caveLayer, cx, cz)
+            biome = BiomeHelper.getHolder(biomeid)
+        }
+        if (!biome) return -1
         if (CDGTags?.DENY_OIL_BIOMES && biome.containsTag(CDGTags.DENY_OIL_BIOMES)) return 0
         let isHighInOil = CDGTags?.OIL_BIOMES && biome.containsTag(CDGTags.OIL_BIOMES)
         if ((isHighInOil && CDGConfig.DISABLE_HIGH_OIL_CHUNKS?.get()) ||
@@ -1187,7 +1266,7 @@ const CDGOil = {
     getOilSmart(x, z) {
         if (stopRequested) throw new Error('StopScript')
         const fast = this.getBaseOilAmountFast(x, z)
-        if (fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()) return fast
+        if (!this.level || fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()) return fast
         return this.getBaseOilAmount(x, z)
     },
     /** @param {number} cx @param {number} cz @param {number} innerRadius */
@@ -1220,7 +1299,7 @@ const CDGOil = {
     processChunk(x, z, onChunk) {
         if (OilStore.has(x, z)) { onChunk(false, true); return }
         const oil = this.getOilSmart(x, z)
-        OilStore.set(x, z, oil)
+        if (oil >= 0) OilStore.set(x, z, oil)
         onChunk(true, false)
     },
     progress: { line1: '', line2: '', visible: false, onMap: false },
@@ -1316,8 +1395,8 @@ function main() {
             const regionH = guimap.height || (Hud.getWindowHeight() / Hud.getScaleFactor())
             const baseY = regionH - 30
             const progressDraw = Hud.createDraw2D()
-            const pLine1 = progressDraw.addText('', 20, baseY, 0xFFFF00, true)
-            const pLine2 = progressDraw.addText('', 20, baseY + 13, 0xAAAAAA, true)
+            const pLine1 = progressDraw.addText('', 20, baseY | 0, 0xFFFF00, true)
+            const pLine2 = progressDraw.addText('', 20, (baseY + 13) | 0, 0xAAAAAA, true)
             screen.addDraw2D(progressDraw, 0, 0, regionW, regionH)
 
             progress_listener = bus.addListener(() => {
@@ -1351,11 +1430,10 @@ function main() {
                         stopRequested = true
                         mclog('已请求中断扫描', 12)
                     } else {
-                        const mx = guimap.mouseBlockPosX
-                        const mz = guimap.mouseBlockPosZ
+                        let mx = guimap.mouseBlockPosX
+                        let mz = guimap.mouseBlockPosZ
                         if (!Number.isFinite(mx) || !Number.isFinite(mz)) return
-                        const cx = Math.floor(mx / 16)
-                        const cz = Math.floor(mz / 16)
+                        let cx = mx >> 4, cz = mz >> 4
                         startScan(cx, cz)
                     }
                 }
@@ -1449,3 +1527,4 @@ if (isEnabled()) {
         }
     }).offHandle = () => { teardown() }
 }
+

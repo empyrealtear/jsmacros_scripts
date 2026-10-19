@@ -7,10 +7,20 @@
 // 更新内容: v1.3 在服务器中可以自己填入种子，依照已记录地图的群系计算油田
 
 /**
- * @type {number} 自定义种子，末尾要带n，防止长种子精度损失
+ * @type {number} 自定义种子，末尾要带n，防止长种子精度损失，例如：123456789123456789n
  * @description 仅在服务器中客户端会用该种子来计算油田数值，单人存档会自动获取种子
  */
-const CUSTOM_SEED = 0n
+const CUSTOM_SEED = null
+// ==================== 全局渲染参数 ====================
+/** 渲染半径（区块） */
+const MARKER_RADIUS = 15
+/** 未扫描遮罩半径（区块） */
+const MOUSE_RADIUS = 15
+/** 刷新间隔（tick） */
+const REFRESH_INTERVAL_TICKS = 5
+/** 扫描半径（区块） */
+const SCAN_RADIUS = 50
+
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -36,16 +46,7 @@ const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color 
 const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
 /** @param {boolean} [v] */
 const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
-
-// ==================== 全局渲染参数 ====================
-/** 渲染半径（区块） */
-const MARKER_RADIUS = 15
-/** 未扫描遮罩半径（区块） */
-const MOUSE_RADIUS = 15
-/** 刷新间隔（tick） */
-const REFRESH_INTERVAL_TICKS = 10
-/** 扫描半径（区块） */
-const SCAN_RADIUS = 50
+const _dev = false
 
 // ==================== 预计算偏移 ====================
 /** @type {[number, number][]} 有油区块渲染偏移 */
@@ -261,7 +262,7 @@ const IMPORT = {
 class ModBuilder {
     static package = 'xyz.wagyourtail.jsmacros.core.library.impl.classes.proxypackage.'
     static namespace = 'XaeroOil'
-    static suffix = '' + `_${Date.now()}`
+    static suffix = _dev ? `_${Date.now()}` : ''
     static Element = `${this.namespace}_Element${this.suffix}`
     static Context = `${this.namespace}_Context${this.suffix}`
     static MINIMAP = {
@@ -563,7 +564,6 @@ class XaeroOverlayManager {
         this.minimapRenderer = Reflection.newInstance(rendererCls, this.minimapContext)
         this.minimapHandler.add(this.minimapRenderer)
         this.minimapInited = true
-        mclog('小地图渲染层已注册')
         return this
     }
     /** @returns {this} 注册世界地图渲染层 */
@@ -577,7 +577,6 @@ class XaeroOverlayManager {
         this.worldMapRenderer = Reflection.newInstance(rendererCls, this.worldMapContext)
         this.worldMapHandler.add(this.worldMapRenderer)
         this.worldMapInited = true
-        mclog('世界地图渲染层已注册')
         return this
     }
     /** @returns {this} 注册所有渲染层 */
@@ -586,6 +585,7 @@ class XaeroOverlayManager {
         this.ContextCls = ModBuilder.createContextClass()
         this.registerMinimap()
         this.registerWorldMap()
+        mclog('地图渲染层已注册')
         return this
     }
     /** @returns {boolean} */
@@ -1207,6 +1207,8 @@ const BiomeHelper = {
 const CDGOil = {
     /** @type {ServerLevel?} */
     level: null,
+    worldmap: null,
+    fullSampling: false,
     /** @returns {typeof CDGOil} */
     init() {
         this.level = this.getOverworld()
@@ -1226,32 +1228,57 @@ const CDGOil = {
         }
     },
     /** @returns {bigint} */
-    getSeed() { return this.level ? new DeobfRef(this.level).call(['getSeed', 'method_8412', 'm_7328_']) : CUSTOM_SEED },
+    getSeed() { return new DeobfRef(this.level).call(['getSeed', 'method_8412', 'm_7328_']) },
     /** @param {number} x @param {number} z @returns {Holder<Biome>} */
     getNoiseBiome(x, z) {
-        return new DeobfRef(this.level).call(
-            ['getUncachedNoiseBiome', 'method_22387', 'getGeneratorStoredBiome', 'm_203675_'],
-            x >> 2, 64 >> 2, z >> 2)
-    },
-    /** @param {number} x @param {number} z @returns {number} */
-    getBaseOilAmount(x, z) { return OilChunksSavedData.getBaseOilAmount(this.level, new ChunkPos(x, z)) },
-    /** @param {number} x @param {number} z @returns {number} */
-    getBaseOilAmountFast(x, z) {
         let biome
-        let cx = (x << 4) + 8, cz = (z << 4) + 8
         if (this.level)
-            biome = CDGOil.getNoiseBiome(cx, cz)
+            biome = new DeobfRef(this.level).call(
+                ['getUncachedNoiseBiome', 'method_22387', 'getGeneratorStoredBiome', 'm_203675_'],
+                x >> 2, 64 >> 2, z >> 2)
         else {
-            let worldmap = new WorldMap(Hud.getOpenScreen())
-            let biomeid = worldmap.getBiomeFromTexture(worldmap.caveLayer, cx, cz)
+            this.worldmap ??= new WorldMap(Hud.getOpenScreen())
+            let biomeid = this.worldmap.getBiomeFromTexture(this.worldmap.caveLayer, x, z)
+            if (!biomeid)
+                FS.open('debug.txt').append(`${new Date().toLocaleString()} [${x},${z}] ${biomeid}\n`)
             biome = BiomeHelper.getHolder(biomeid)
         }
-        if (!biome) return -1
-        if (CDGTags?.DENY_OIL_BIOMES && biome.containsTag(CDGTags.DENY_OIL_BIOMES)) return 0
-        let isHighInOil = CDGTags?.OIL_BIOMES && biome.containsTag(CDGTags.OIL_BIOMES)
-        if ((isHighInOil && CDGConfig.DISABLE_HIGH_OIL_CHUNKS?.get()) ||
-            (!isHighInOil && CDGConfig.DISABLE_NORMAL_OIL_CHUNKS?.get())) return 0
-        let seed = this.getSeed()
+        return biome
+    },
+    /** @param {number} x @param {number} z @returns {number} */
+    getBaseOilAmount(x, z) {
+        Client.waitTick()
+        return OilChunksSavedData.getBaseOilAmount(this.level, new ChunkPos(x, z))
+    },
+    /** @param {number} x @param {number} z @returns {number} */
+    getBaseOilAmountFast(x, z, fullSampling) {
+        let seed = this.level ? this.getSeed() : CUSTOM_SEED
+        if (!seed) throw new Error('Not Found Seed')
+        let px = x << 4, pz = z << 4
+        let denytag = CDGTags?.DENY_OIL_BIOMES
+        let oiltag = CDGTags?.OIL_BIOMES
+        let isHighInOil = false
+        if (fullSampling) {
+            for (let dx = 0; dx < 16; dx++) {
+                for (let dz = 0; dz < 16; dz++) {
+                    let biome = this.getNoiseBiome(px + dx, pz + dz)
+                    if (!biome) return -1
+                    if (denytag && biome.containsTag(denytag)) return 0
+                    if (oiltag && biome.containsTag(oiltag)) isHighInOil = true
+                }
+            }
+            Client.waitTick()
+        } else {
+            let biome = this.getNoiseBiome(px + 8, pz + 8)
+            if (!biome) return -1
+            if (denytag && biome.containsTag(denytag)) return 0
+            if (oiltag && biome.containsTag(oiltag)) isHighInOil = true
+        }
+        
+        if ((isHighInOil && CDGConfig?.DISABLE_HIGH_OIL_CHUNKS?.get())
+            || (!isHighInOil && CDGConfig?.DISABLE_NORMAL_OIL_CHUNKS?.get()))
+            return 0
+
         let scale = CDGConfig.OIL_CHUNK_SCALE.get()
         let randomSource = RandomSource.call(['create', 'method_43049', 'm_216335_'], seed)
         let noise = PerlinNoise.call(['create', 'method_39127', 'm_230529_'], randomSource, [-2, -1, 0, 1])
@@ -1264,10 +1291,11 @@ const CDGOil = {
     },
     /** @param {number} x @param {number} z @returns {number} */
     getOilSmart(x, z) {
-        if (stopRequested) throw new Error('StopScript')
-        const fast = this.getBaseOilAmountFast(x, z)
-        if (!this.level || fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()) return fast
-        return this.getBaseOilAmount(x, z)
+        if (stopRequested) throw new Error('Stop Scan')
+        const fast = this.getBaseOilAmountFast(x, z, this.fullSampling)
+        if (fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()) return fast
+        
+        return this.level ? this.getBaseOilAmount(x, z) : this.getBaseOilAmountFast(x, z, true)
     },
     /** @param {number} cx @param {number} cz @param {number} innerRadius */
     fineScan(cx, cz, innerRadius) {
@@ -1275,7 +1303,7 @@ const CDGOil = {
         const startTime = Date.now()
         let done = 0, newCount = 0, cachedCount = 0
         for (let r = 0; r <= innerRadius; r++) {
-            if (stopRequested) throw new Error('StopScript')
+            if (stopRequested) throw new Error('Stop Scan')
             this.scanRing(cx, cz, r, (n, c) => {
                 if (n) newCount++
                 if (c) cachedCount++
@@ -1397,7 +1425,7 @@ function main() {
             const progressDraw = Hud.createDraw2D()
             const pLine1 = progressDraw.addText('', 20, baseY | 0, 0xFFFF00, true)
             const pLine2 = progressDraw.addText('', 20, (baseY + 13) | 0, 0xAAAAAA, true)
-            screen.addDraw2D(progressDraw, 0, 0, regionW, regionH)
+            screen.addDraw2D(progressDraw, 0, 0, regionW | 0, regionH | 0)
 
             progress_listener = bus.addListener(() => {
                 if (!pLine1) return
@@ -1473,8 +1501,10 @@ function startScan(cx, cz) {
         try {
             CDGOil.fineScan(cx, cz, SCAN_RADIUS)
         } catch (e) {
-            if (`${e}`.indexOf('StopScript') < 0)
-                mclog(`扫描异常: ${e}`, 12)
+            if (`${e}`.indexOf('Stop Scan') < 0)
+                mclog(`扫描异常 ${e}`, 12)
+            else if (`${e}`.indexOf('Not Found Seed') < 0)
+                mclog(`扫描异常 ${e}`, 12)
             else
                 mclog('扫描已中断', 12)
         } finally {
@@ -1527,4 +1557,3 @@ if (isEnabled()) {
         }
     }).offHandle = () => { teardown() }
 }
-

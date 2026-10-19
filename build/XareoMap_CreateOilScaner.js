@@ -19,7 +19,7 @@ const MOUSE_RADIUS = 15
 /** 刷新间隔（tick） */
 const REFRESH_INTERVAL_TICKS = 5
 /** 扫描半径（区块） */
-const SCAN_RADIUS = 50
+const SCAN_RADIUS = 15
 
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
@@ -1398,7 +1398,7 @@ function main() {
     // 刷新驱动
     let refreshCounter = 0
     refresh_listener = bus.addListener(() => {
-        if (++refreshCounter % REFRESH_INTERVAL_TICKS !== 0) return
+        if (++refreshCounter % (scanning ? 20 : REFRESH_INTERVAL_TICKS)!== 0) return
         if (!marker) return
         let center = getCurrentCenter()
         if (!center) return

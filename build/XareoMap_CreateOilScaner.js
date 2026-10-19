@@ -1,7 +1,7 @@
 // 脚本名称: 机械动力:柴油动力油田扫描
-// 功能介绍: 在Xaero地图上显示柴油动力油田储量，Alt+左键扫描，Alt+H键隐藏高亮
-// 依赖模组: 宏(jsmacros)、机械动力:柴油动力(Create: Diesel Generators)、Xaero地图
+// 功能介绍: 在Xaero地图上显示柴油动力油田储量
 // 按键绑定: 地图界面（[Alt+H键] 显示/隐藏油田标记，[Alt+左键] 开始/中断范围扫描）
+// 依赖模组: 宏(jsmacros)、机械动力:柴油动力(Create: Diesel Generators)、Xaero地图
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 调整缓存格式，油田关键参数也一同保存
 // 更新内容: v1.2 添加地图渲染管线，统一存储到存档目录下
@@ -1240,8 +1240,6 @@ const CDGOil = {
         else {
             this.worldmap ??= new WorldMap(Hud.getOpenScreen())
             let biomeid = this.worldmap.getBiomeFromTexture(this.worldmap.caveLayer, x, z)
-            if (!biomeid)
-                FS.open('debug.txt').append(`${new Date().toLocaleString()} [${x},${z}] ${biomeid}\n`)
             biome = BiomeHelper.getHolder(biomeid)
         }
         return biome

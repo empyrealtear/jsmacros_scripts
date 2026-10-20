@@ -35,6 +35,7 @@
 )、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/page/柴油动力油田预览.html)
 - 沉浸工程矿脉预览: [XareoMap_IEVeins.js](./build/XareoMap_IEVeins.js)、[沉浸工程矿脉预览(网页版)](https://empyrealtear.github.io/jsmacros_scripts/page/沉浸工程矿脉预览.html)
 - 失落城市地图雷达: [XareoMap_LostRadar.js](./build/XareoMap_LostRadar.js)
+- 自然指南针自定义搜索中心（forge1.20.1）: [NaturesCompass.js](./build/NaturesCompass.js)
 - Baritone路径规划渲染: [BaritoneRender.js](./build/BaritoneRender.js)
 - 潮汐自动钓鱼: [TideFishMinigame.js](./build/TideFishMinigame.js)
 - 星露谷插件自动钓鱼: [CustomFishing.js](./build/CustomFishing.js)、[ResourceParse_CustomFishing.js](./build/ResourceParse_CustomFishing.js)

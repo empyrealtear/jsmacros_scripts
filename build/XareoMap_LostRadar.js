@@ -12,6 +12,7 @@
 // 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示问题
 // 更新内容: v1.8 添加悬浮窗区域显示，纹理添加建筑级别
 // 更新内容: v1.9 修复ALI缓存路径异常，添加预览战利品模式切换按钮，优化建筑注册提示条件
+// 更新内容: v1.9.1 兼容服务触发常驻脚本模式
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -963,7 +964,10 @@ const utils = {
     /** @returns {ClientLevel} 主世界level */
     level() { return World.getRaw() },
     /** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
-    getChunkKey() { let c = Player.getPlayer()?.getChunk(); return `${c.getChunkX()},${c.getChunkZ()}` },
+    getChunkKey() {
+        let c = Player.getPlayer()?.getChunk();
+        return c ? `${c.getChunkX()},${c.getChunkZ()}`: null
+    },
     /** @returns {string} 国际化翻译 */
     transkey(key) { return Chat.createTextHelperFromTranslationKey(key).getString().trim() },
     /** @return {mcjty.lostradar.data.MapPalette$PaletteEntry} */
@@ -1023,14 +1027,16 @@ const utils = {
 
 /** 进度查询 */
 const DCAdvancement = {
-    map: {}, manager: Player.getPlayer().getAdvancementManager(),
+    map: {}, manager() { return Player.getPlayer()?.getAdvancementManager() },
     loads() {
-        for (let v of this.manager.getAdvancementsForIdentifiers().keySet())
-            if (v.startsWith('deceasedcraft:')) this.map[v.replace(/\:.*\//, ':')] = v
+        for (let v of this.manager()?.getAdvancementsForIdentifiers()?.keySet() ?? [])
+            if (v.startsWith('deceasedcraft:'))
+                this.map[v.replace(/\:.*\//, ':')] = v
     },
     isDone(buildid) {
+        Object.keys(this.map).length == 0 && this.loads()
         let id = this.map[`${buildid}`.split('/')[0]]
-        return id && this.manager.getAdvancementProgress(id).isDone()
+        return id && this.manager()?.getAdvancementProgress(id).isDone()
     }
 }
 /** JEI ALI战利品信息 */
@@ -1041,8 +1047,9 @@ const JEIAPI = {
     isOffline() { return GlobalVars.getBoolean(this.key) },
     toggleOffline(v) { return GlobalVars.putBoolean(this.key, v ?? !this.isOffline()) },
     init(offline) {
+        if (this.inited) return this
         this.jei = DeobfRef.type('mezz.jei.common.Internal')?.getJeiRuntime()
-        this.typeId = new ResourceLocation('ali', 'chest_loot')
+        this.typeId = new ResourceLocation('ali:chest_loot')
         if (!this.jei) return // 未安装JEI
         this.recipeManager = this.jei.getRecipeManager()
         this.recipesGui = this.jei.getRecipesGui()
@@ -1213,6 +1220,8 @@ class VisitedStore {
         /** @type {string|() => string|undefined} */ this._writePath = writePath
         /** @type {Object<string, Object<string, number>>?} 维度 → { 区块key: 时间戳 } */
         this.cache = null
+        /** @type {string} */
+        this.latest_path = null
     }
     /** @returns {string[]} 读取路径列表（按优先级） */
     get readPaths() {
@@ -1226,17 +1235,19 @@ class VisitedStore {
     }
     /** 从本地文件加载 @returns {Object<string, Object<string, number>>} */
     load() {
-        if (this.cache) return this.cache
+        let path = this.path
+        if (this.cache && path == this.latest_path) return this.cache
         this.cache = {}
         for (let p of this.readPaths) {
             if (FS.exists(p)) {
                 let raw = FS.open(p).read()
                 if (raw && raw.length > 0) {
                     this.cache = JSON.parse(raw)
-                    if (p !== this.path && Object.keys(this.cache).length > 0) {
-                        mclog(`迁移记录 §a${p} §7→ §a${this.path}`)
+                    if (p !== path && Object.keys(this.cache).length > 0) {
+                        mclog(`迁移记录 §a${p} §7→ §a${path}`)
                         this.save()
                     }
+                    this.latest_path = path
                     break
                 }
             }
@@ -1631,6 +1642,7 @@ function main() {
         bus.remove(filter_listener)
         tipDraw = null
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
+            JEIAPI.init()
             DCAdvancement.loads()
             let guimap = new WorldMap(screen)
             let tipRegion = { x: 0, y: 0, width: guimap.width, height: guimap.height }
@@ -1818,7 +1830,6 @@ try {
 if (isEnabled()) {
     bus.start()
     MarkerState.init()
-    JEIAPI.init()
     main()
     _listener.step = 5
     _listener.on(() => {

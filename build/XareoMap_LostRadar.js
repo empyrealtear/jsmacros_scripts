@@ -11,6 +11,7 @@
 // 更新内容: v1.6 改用地图渲染管线，替代 Draw2D 手动绘制，兼容旧存储数据，统一存储到存档(单人)或者脚本目录(多人)
 // 更新内容: v1.7 修复公测版小地图锁定北方获取问题，添加高级战利品显示问题
 // 更新内容: v1.8 添加悬浮窗区域显示，纹理添加建筑级别
+// 更新内容: v1.9 修复ALI缓存路径异常，添加预览战利品模式切换按钮，优化建筑注册提示条件
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -614,9 +615,9 @@ class WorldMap {
         /** @type {Packages.org.joor.Reflect} */ this.target = Reflection.getReflect(screen)
     }
     /** @returns {number} 屏幕宽（GUI 缩放坐标） */
-    get width() { return this.raw.getWidth() }
+    get width() { return (Hud.getWindowWidth() / Hud.getScaleFactor()) | 0 }
     /** @returns {number} 屏幕高（GUI 缩放坐标） */
-    get height() { return this.raw.getHeight() }
+    get height() { return (Hud.getWindowHeight() / Hud.getScaleFactor()) | 0 }
     /** @returns {number} 地图缩放比例 */
     get mapScale() { return this.target.get('scale') }
     /** @returns {number} 地图缩放比例 */
@@ -720,11 +721,11 @@ class Event {
         this.keyStates = {}
         /** @type {boolean} 消费标记 */
         this.consumed = false
-        let latest = [...Event.latest]
+        let latest = new Set(Event.latest)
         let all_keys = new Set(this.keys.concat(latest))
         for (let key of all_keys) {
             let isPressed = this.keys.includes(key)
-            let wasPressed = latest.includes(key)
+            let wasPressed = latest.has(key)
             if (isPressed) {
                 if (wasPressed) {
                     this.keyStates[key] = { state: 'holding', cache: Event.cache[key] }
@@ -959,8 +960,8 @@ class Draw2DUtils {
 }
 
 const utils = {
-    /** @returns {ClientLevel} 主世界 ClientLevel */
-    level() { return new DeobfRef(Client.getMinecraft()).get('level', 'field_1687', 'world', 'f_91073_') },
+    /** @returns {ClientLevel} 主世界level */
+    level() { return World.getRaw() },
     /** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
     getChunkKey() { let c = Player.getPlayer()?.getChunk(); return `${c.getChunkX()},${c.getChunkZ()}` },
     /** @returns {string} 国际化翻译 */
@@ -1035,7 +1036,11 @@ const DCAdvancement = {
 /** JEI ALI战利品信息 */
 const JEIAPI = {
     path: 'data/ali_chest_loot.json', recipes: [], localRecipes: {}, inited: false,
-    init() {
+    key: `${scriptName}:ALIOffline`,
+    priorityKeys: ['artifacts', 'nameless_trinkets', 'legendarysurvivaloverhaul', 'tacz', 'secruitycraft'],
+    isOffline() { return GlobalVars.getBoolean(this.key) },
+    toggleOffline(v) { return GlobalVars.putBoolean(this.key, v ?? !this.isOffline()) },
+    init(offline) {
         this.jei = DeobfRef.type('mezz.jei.common.Internal')?.getJeiRuntime()
         this.typeId = new ResourceLocation('ali', 'chest_loot')
         if (!this.jei) return // 未安装JEI
@@ -1045,17 +1050,17 @@ const JEIAPI = {
         if (this.recipeType) {
             this.category = this.recipeManager.getRecipeCategory(this.recipeType)
             this.recipes = Array.from(this.recipeManager.createRecipeLookup(this.recipeType).get().toList())
-            this.recipes = []; this.localRecipes = this.load() // 模拟服务器
-            this.save()
-        } else {
-            this.localRecipes = this.load()
+            // this.recipes = [] // 模拟服务器
+            try { this.save() } catch (e) { mclog(`[JEIAPI] ${e}`) }
         }
+        try { this.localRecipes = this.load() } catch (e) { mclog(`[JEIAPI] ${e}`) }
         if (this.recipes.length + Object.keys(this.localRecipes).length == 0) return
         this.inited = true
+        return this
     },
     show(filter_handle) {
         if (!this.inited || !filter_handle) return
-        if (this.recipes.length > 0) {
+        if (this.recipes.length > 0 && !this.isOffline()) {
             let results = this.recipes.filter(v => filter_handle(`${v.type().id()}`))
             if (results.length == 0) return
             Client.runOnMainThread(JavaWrapper.methodToJava(() => {
@@ -1120,7 +1125,7 @@ const JEIAPI = {
         }
         return items
     },
-    load() { return FS.exists(this.path) ? JSON.parse(FS.open(this.path).read()) : [] },
+    load() { return FS.exists(this.path) ? JSON.parse(FS.open(this.path).read()) : {} },
     save() {
         if (this.recipes.length == 0 || FS.exists(this.path)) return
         let result = {}
@@ -1140,11 +1145,12 @@ const JEIAPI = {
             result[id] = { name, items }
         }
         if (Object.keys(result).length > 0) {
+            let dir = this.path.substring(0, this.path.lastIndexOf('/'))
+            if (!FS.exists(dir)) FS.makeDir(dir)
             FS.open(this.path).write(JSON.stringify(result, null, 4))
-            mclog(`已保存${Object.keys(result).length}条配方到${this.path}`)
+            mclog(`已保存${Object.keys(result).length}条配方到§6${this.path}`)
         }
     },
-    priorityKeys: ['nameless_trinkets', 'artifacts', 'tacz', 'legendarysurvivaloverhaul', 'secruitycraft'],
     pretty(callback) {
         /** @type {Record<string,Set<string>>} */
         let map = {}
@@ -1161,15 +1167,24 @@ const JEIAPI = {
             }
         return Object.entries(map).sort((a, b) => {
             let keyA = a[0], keyB = b[0]
-            let isPriorityA = this.priorityKeys.includes(keyA), isPriorityB = this.priorityKeys.includes(keyB)
-            if (isPriorityA && !isPriorityB) return -1 // 如果 A 是优先，B 不是，A 排前面（返回 -1）
-            if (!isPriorityA && isPriorityB) return 1 // 如果 B 是优先，A 不是，B 排前面（返回 1）
-            return keyA.localeCompare(keyB)  // 如果都不是优先，或者都是优先，则按照字母序排
+            let idxA = this.priorityKeys.indexOf(keyA)
+            let idxB = this.priorityKeys.indexOf(keyB)
+            let isPriorityA = idxA !== -1
+            let isPriorityB = idxB !== -1
+
+            // 1. A优先，B不优先 -> A排前面
+            if (isPriorityA && !isPriorityB) return -1
+            // 2. B优先，A不优先 -> B排前面
+            if (!isPriorityA && isPriorityB) return 1
+            // 3. 都是优先 -> 按照 priorityKeys 中定义的先后顺序（索引小的排前面）
+            if (isPriorityA && isPriorityB) return idxA - idxB
+            // 4. 都不是优先 -> 按字母序排
+            return keyA.localeCompare(keyB)
         }).map(([k, v]) => [`§7[§6${k}§7]`, ...Array.from(v).sort()]).flat()
     }
 }
 const LootrPanel = {
-    title: null, list: [], page: 1, step: 28,
+    title: null, list: [], page: 1, step: 26,
     reset() { this.title = null, this.list = [], this.page = 1 },
     total() { return Math.ceil(this.list.length / this.step) },
     prevpage() { this.page = Math.max(1, this.page - 1) },
@@ -1271,10 +1286,10 @@ class VisitedStore {
 /** 标记状态（附带纹理初始化） */
 const MarkerState = {
     /** @typedef {{color:number, texture:CustomImage?, largeTexture:CustomImage?}} MarkerStateDef 标记状态定义 */
-    UNREGISTERED_UNVISITED: { color: 0xFF4444, texture: null, largeTexture: null },
-    UNREGISTERED_VISITED: { color: 0xFF8844, texture: null, largeTexture: null },
-    REGISTERED_UNVISITED: { color: 0xFFFF44, texture: null, largeTexture: null },
-    REGISTERED_VISITED: { color: 0x44FF44, texture: null, largeTexture: null },
+    UNREGISTERED_UNVISITED: { label: '未注册未去过', color: 0xFF4444, texture: null, largeTexture: null },
+    UNREGISTERED_VISITED: { label: '已注册已去过', color: 0xFF8844, texture: null, largeTexture: null },
+    REGISTERED_UNVISITED: { label: '已注册未去过', color: 0xFFFF44, texture: null, largeTexture: null },
+    REGISTERED_VISITED: { label: '已注册已去过', color: 0x44FF44, texture: null, largeTexture: null },
     /** 预创建所有标记纹理（区分大小建筑） */
     init() {
         for (const [name, state] of Object.entries(this)) {
@@ -1330,8 +1345,8 @@ class RadarMarker {
     /** 清空所有标记 */
     clear() { this.overlay.clear(); this.elements.clear(); this.lastSyncKey = null }
     /** 切换开关 */
-    toggle() {
-        this.enabled = !this.enabled
+    toggle(v) {
+        this.enabled = v ?? !this.enabled
         GlobalVars.putBoolean(`${scriptName}:Hightlight`, this.enabled)
         if (!this.enabled) this.clear()
         return this.enabled
@@ -1454,12 +1469,36 @@ class RadarMarker {
 /** tooltip 构建器 */
 class RadarTooltip {
     static ICON_MAP = {
-        "0_0": { level: 1, temp: 0, id: "suburb_residential", name: '§a郊区住宅群§8 | §a🍃§8 | §a🌡温暖' },
-        "32_0": { level: 2, temp: 1, id: "highrise_office", name: '§c摩天办公区§8 | §c🔥🔥§8 | §c🌡炎热' },
-        "64_0": { level: 2, temp: -1, id: "highrise_residential", name: '§9摩天住宅区§8 | ❄️❄️§8 | §9🌡寒冷' },
-        "96_0": { level: 3, temp: 1, id: "highrise_hotel", name: '§c摩天酒店区§8 | §c🔥🔥🔥§8 | §c🌡炽热难耐' },
-        "128_0": { level: 3, temp: -1, id: "retail_district", name: '§9零售商业区§8 | §9❄️❄️❄️§8 | §9🌡严寒刺骨' },
-        "-1_-1": { level: 4, temp: 1, id: "wasteland", name: '§c荒地§8 | §c☢️☢️☢️☢️§8 | §c🌡辐射警告' }
+        "0_0": {
+            level: 1, temp: 0, id: "suburb_residential",
+            largeImageKey: 'suburb_residential_frameless',
+            name: '§a郊区住宅群§8 | §a🍃§8 | §a🌡温暖'
+        },
+        "32_0": {
+            level: 2, temp: 1, id: "highrise_office",
+            largeImageKey: 'highrise_office_frameless',
+            name: '§c摩天办公区§8 | §c🔥🔥§8 | §c🌡炎热'
+        },
+        "64_0": {
+            level: 2, temp: -1, id: "highrise_residential",
+            largeImageKey: 'highrise_residential_frameless',
+            name: '§9摩天住宅区§8 | ❄️❄️§8 | §9🌡寒冷'
+        },
+        "96_0": {
+            level: 3, temp: 1, id: "highrise_hotel",
+            largeImageKey: 'highrise_hotel_frameless',
+            name: '§c摩天酒店区§8 | §c🔥🔥🔥§8 | §c🌡炽热难耐'
+        },
+        "128_0": {
+            level: 3, temp: -1, id: "retail_district",
+            largeImageKey: 'retail_frameless',
+            name: '§9零售商业区§8 | §9❄️❄️❄️§8 | §9🌡严寒刺骨'
+        },
+        "-1_-1": {
+            level: 4, temp: 1, id: "wasteland",
+            largeImageKey: 'wasteland_0',
+            name: '§c荒地§8 | §c☢️☢️☢️☢️§8 | §c🌡辐射警告'
+        }
     }
     /** @param {VisitedStore} store */
     constructor(store) { /** @type {VisitedStore} */ this.store = store }
@@ -1486,8 +1525,10 @@ class RadarTooltip {
         if (region) lines.push(` §8-§7 区域: ${region.name}`)
         lines.push(` §8-§7 收集: ${registered ? '§a已注册' : '§c未注册'}`)
         lines.push(` §8-§7 去过: ${visited ? '§a已去过' : '§c未去过'}`)
-        lines.push((visited ? `§8[Shift+左键] 取消标记` : `§8[Shift+左键] 标记去过`)
-            + (!JEIAPI.inited ? '' : ` §8[Alt+左键] ${JEIAPI.recipes.length > 0 ? '跳转JEI' : '查看战利品'}`))
+        lines.push(`§8[§6H键§8] ${marker.enabled ? '显示标记' : '隐藏标记'}`)
+        lines.push(`§8[§6Shift+左键§8] ${visited ? '取消标记' : '标记去过'}`)
+        if (JEIAPI.inited)
+            lines.push(`§8[§6Alt+左键§8] ${JEIAPI.isOffline() ? '侧边战利品' : 'JEI战利品'}`)
         return lines
     }
     /**
@@ -1502,6 +1543,78 @@ class RadarTooltip {
     }
 }
 
+class Button {
+    /**
+     * @param {Draw2D} parent
+     * @param {{
+     *  x:number,y:number,width:number,height:number,
+     *  enabled:boolean|(self:Button)=>boolean,
+     *  text:string|(self:Button,enabled:boolean)=>string,
+     *  onClick:(self:Button,event:Event)=>void,
+     *  onHover:(self:Button,event:Event)=>void
+     * }} opts 
+     */
+    constructor(parent, opts) {
+        const { x, y, width, height, enabled, text, onClick, onHover } = opts
+        this.parent = parent
+        /** @type {{text:Text,background:Rect}} */
+        this.elements = {}
+
+        this._textFn, this.text = text ?? ''
+        this._enabledFn, this.enabled = enabled ?? false
+        this.x = x ?? 0
+        this.y = y ?? 0
+        this.width = width ?? 0
+        this.height = height ?? 0
+        this.onClick = onClick ?? ((v) => { })
+        this.onHover = onHover ?? ((v) => { })
+    }
+
+    get enabled() { return this._enabledFn(this) }
+    set enabled(v) { this._enabledFn = this.isFunction(v) ? v : v }
+    get text() { return this._textFn(this) }
+    set text(v) { this._textFn = this.isFunction(v) ? v : v }
+    isFunction(v) { return typeof v == 'function' }
+    buildandAdd() {
+        this.remove()
+        this.elements['background'] = this.parent.rectBuilder()
+            .pos1(this.x | 0, this.y | 0).size(this.width, this.height)
+            .color(0x000000).alpha(200).buildAndAdd()
+        this.elements['text'] = this.parent.textBuilder()
+            .scale(3 / Hud.getScaleFactor()).text(this.text)
+            .color(0xFFFFFF).align(this.elements['background'], 'CenterOnCenter', 'CenterOnCenter')
+            .buildAndAdd()
+        return this
+    }
+    update() {
+        this.elements['text'].setText(this.text)
+            .align(this.elements['background'], 'CenterOnCenter', 'CenterOnCenter')
+        return this
+    }
+    remove() {
+        Object.values(this.elements).forEach(v => this.parent.reAddElement(v))
+        this.elements = {}
+    }
+    /** @param {Event} event  */
+    focus(event) {
+        let dx = event.mouse.getX() - this.x, dy = event.mouse.getY() - this.y
+        return dx > 0 && dy > 0 && dx < this.width && dy < this.height
+    }
+    /** @param {Event} event  */
+    tick(event) {
+        this.update()
+        if (event.consumed) return
+        if (this.focus(event)) {
+            this.onHover(this, event)
+            if (event.click()) {
+                if (!this.isFunction(this._enabledFn))
+                    this.enabled = !this.enabled
+                this.onClick(this, event)
+            }
+            event.consumed = true
+        }
+    }
+}
 function main() {
     overlay = new XaeroOverlayManager().register()
     marker = new RadarMarker(overlay, visitedStore)
@@ -1520,29 +1633,48 @@ function main() {
         if (screen && Reflection.getClassName(screen) == 'xaero.map.gui.GuiMap') {
             DCAdvancement.loads()
             let guimap = new WorldMap(screen)
-            let tipRegion = {
-                x: 0, y: 0,
-                width: guimap.width || (Hud.getWindowWidth() / Hud.getScaleFactor()),
-                height: guimap.height || (Hud.getWindowHeight() / Hud.getScaleFactor())
+            let tipRegion = { x: 0, y: 0, width: guimap.width, height: guimap.height }
+            const buildingHover = (event) => {
+                const cx = Math.floor(guimap.mouseBlockPosX / 16)
+                const cz = Math.floor(guimap.mouseBlockPosZ / 16)
+                const dim = World.getDimension()
+                let lines = []
+                let entry = utils.getRadarData(cx, cz)
+                if (entry) {
+                    lines = radarTooltip.build(entry, cx, cz, dim)
+                } else {
+                    const vt = visitedStore.getTime(dim, `${cx},${cz}`)
+                    if (vt != null) lines = radarTooltip.buildVisitedOnly(cx, cz, vt)
+                }
+                tipDraw.tooltips = [{ tips: lines }, { x: 20, y: 45, tips: LootrPanel.current() }]
             }
-            tipDraw = new Draw2DUtils(tipRegion, (self, drawContext) => {
-                try {
-                    if (!drawContext) return
-                    const cx = Math.floor(guimap.mouseBlockPosX / 16)
-                    const cz = Math.floor(guimap.mouseBlockPosZ / 16)
-                    const dim = World.getDimension()
-                    let lines = []
-                    let entry = utils.getRadarData(cx, cz)
-                    if (entry) {
-                        lines = radarTooltip.build(entry, cx, cz, dim)
-                    } else {
-                        const vt = visitedStore.getTime(dim, `${cx},${cz}`)
-                        if (vt != null) lines = radarTooltip.buildVisitedOnly(cx, cz, vt)
+            tipDraw = new Draw2DUtils(tipRegion)
+            screen.addDraw2D(tipDraw.target, 0, 0, 0, 0)
+            let btns = [
+                new Button(tipDraw.target, {
+                    x: 30, y: 8, width: 20, height: 16,
+                    enabled: (self) => JEIAPI.isOffline(), text: (self) => self.enabled ? '侧边' : 'ALI',
+                    onClick: (self, event) => JEIAPI.toggleOffline(),
+                    onHover: (self, event) => tipDraw.tooltips = [{
+                        tips: ['战利品展示模式', `  §8-§f 当前模式: ${self.enabled ? '侧边栏' : 'JEI'}`]
+                    }]
+                }).buildandAdd(),
+                new Button(tipDraw.target, {
+                    x: 55, y: 8, width: 20, height: 16,
+                    enabled: (self) => marker.enabled,
+                    text: (self) => self.enabled ? '高亮' : '隐藏',
+                    onClick: (self, event) => {
+                        let cx = guimap.mouseBlockPosX >> 4, cz = guimap.mouseBlockPosZ >> 4
+                        let key = `${cx},${cz}`, dim = World.getDimension()
+                        marker.toggle()
+                        marker.rebuild(cx, cz, dim, true)
+                    },
+                    onHover: (self, event) => {
+                        tipDraw.tooltips = [{ tips: [`§8[§6H§8]§f 当前模式: ${self.enabled ? '高亮' : '隐藏'}`] }]
                     }
-                    self.tooltips = [{ tips: lines }, { x: 20, y: 30, tips: LootrPanel.current() }]
-                } catch (err) { mclog(`[Draw2D渲染管线] ${err}`, 12) }
-            })
-            screen.addDraw2D(tipDraw.target, 0, 0, tipRegion.width, tipRegion.height)
+                }).buildandAdd(),
+            ]
+
             // ==================== 按键监听 ====================
             /** @type {string?} 上次查询的区块 key */
             let last_key = null
@@ -1555,6 +1687,15 @@ function main() {
                 // 读鼠标区块
                 let cx = guimap.mouseBlockPosX >> 4, cz = guimap.mouseBlockPosZ >> 4
                 let key = `${cx},${cz}`, dim = World.getDimension()
+                // ---- 鼠标换区块：重建周边 element ----
+                if (key !== last_key)
+                    last_key = key, marker.rebuild(cx, cz, dim)
+                for (let btn of btns) {
+                    if (event.consumed) break
+                    btn.tick(event)
+                }
+                if (event.consumed) return
+                buildingHover(event)
                 // ---- H 键：切换标记渲染 ----
                 if (event.click(Event.KEY_H)) { marker.toggle() && marker.rebuild(cx, cz, dim, true) }
                 else if (event.click('key.keyboard.a')) { LootrPanel.prevpage() }
@@ -1581,31 +1722,43 @@ function main() {
                             last_key = null, marker.rebuild(cx, cz, dim, true)
                     } else LootrPanel.reset()
                 }
-
-                // ---- 鼠标换区块：重建周边 element ----
-                if (key !== last_key)
-                    last_key = key, marker.rebuild(cx, cz, dim)
             })
         }
     }))
+    let latest_interact = ''
     interact_listener = JsMacros.on("InteractBlock", JavaWrapper.methodToJava((e, ctx) => {
+        if (e.offhand) return
         let id = `${e.block.getId()}`
         let catalog = 'deceasedcraft:building_catalog'
-        let mainHand = Player.getPlayer().getMainHand().getItemId()
+        let player = Player.getPlayer()
+        let mainhand = player.getMainHand().getItemId()
+        let offhand = player.getOffHand().getItemId()
         let pos = e.block.getBlockPos()
-        let cx = pos.getX() >> 4
-        let cz = pos.getZ() >> 4
-        let dim = World.getDimension()
-        if (mainHand == catalog || /lootr_/.test(id)) {
-            utils.markChunkAt(cx, cz, dim, false, true)
-            let entry = utils.getRadarData(cx, cz)
-            if (entry) {
-                let buildings = Array.from(entry.buildings())
-                if (buildings.length > 0 && !DCAdvancement.isDone(buildings[0]))
-                    mclog('此建筑尚未注册')
+        let cx = pos.getX() >> 4, cz = pos.getZ() >> 4, dim = World.getDimension()
+        let key = `${cx},${cz}`
+        let entry = utils.getRadarData(cx, cz)
+        if (entry) {
+            let buildings = Array.from(entry.buildings())
+            if (buildings.length > 0) {
+                if (/lootr_/.test(id))
+                    utils.markChunkAt(cx, cz, dim, false, true)
+                if (mainhand == catalog || offhand == catalog) {
+                    Client.waitTick(10)
+                    DCAdvancement.loads()
+                }
+                if (latest_interact != key && !DCAdvancement.isDone(buildings[0])) {
+                    let biomelevel = MarkerState.getBiomelargeImageKey(World.getBiome())
+                    let icon = RadarTooltip.ICON_MAP[`${entry.iconU()}_${entry.iconV()}`]
+                    let name = `建筑 §6${utils.transkey(entry.translatableKey())}(${key}) §7 `
+                    if (biomelevel == icon.largeImageKey)
+                        Chat.actionbar(`${name}尚未注册`)
+                    else
+                        Chat.actionbar(`${name}需前往 ${icon.name} §7注册`)
+                }
+                marker?.rebuild(cx, cz, dim, true, 5)
             }
-            marker?.rebuild(cx, cz, dim, true, 5)
         }
+        latest_interact = key
     }))
 }
 

@@ -6,6 +6,7 @@
 // 更新内容: v1.1 调整缓存格式，油田关键参数也一同保存
 // 更新内容: v1.2 添加地图渲染管线，统一存储到存档目录下
 // 更新内容: v1.3 在服务器中可以自己填入种子，依照已记录地图的群系计算油田
+// 更新内容: v1.3.1 兼容公测版的xaero地图模组
 
 /**
  * @type {number} 自定义种子，末尾要带n，防止长种子精度损失，例如：123456789123456789n
@@ -20,7 +21,7 @@ const MOUSE_RADIUS = 15
 /** 刷新间隔（tick） */
 const REFRESH_INTERVAL_TICKS = 5
 /** 扫描半径（区块） */
-const SCAN_RADIUS = 15
+const SCAN_RADIUS = 50
 
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
@@ -122,7 +123,7 @@ class DeobfRef {
      * @param {C[]} class_names
      * @returns {GetJava.Type$Graal<C>?}
      */
-    static Type(...class_names) {
+    static type(...class_names) {
         for (let item of class_names)
             try { return Java.type(item) } catch { }
         return null
@@ -133,8 +134,8 @@ class DeobfRef {
      * @param {C[]} class_names
      * @returns {DeobfRef<C>?}
      */
-    static Class(...class_names) {
-        let type = this.Type(...class_names)
+    static class(...class_names) {
+        let type = this.type(...class_names)
         return type ? new this(type) : null
     }
     /** @param {T} v 被反射包装的对象或 Java 类 */
@@ -212,11 +213,11 @@ const OilChunksSavedData = Java.type('com.jesz.createdieselgenerators.world.OilC
 /** @type {JavaClass<CDGConfig>} */
 const CDGConfig = Java.type('com.jesz.createdieselgenerators.CDGConfig')
 /** @type {JavaClass?} */
-const CDGTags = DeobfRef.Type('com.jesz.createdieselgenerators.CDGTags')
+const CDGTags = DeobfRef.type('com.jesz.createdieselgenerators.CDGTags')
 /** @type {DeobfRef<PerlinNoise>?} */
-const PerlinNoise = DeobfRef.Class('net.minecraft.world.level.levelgen.synth.PerlinNoise')
+const PerlinNoise = DeobfRef.class('net.minecraft.world.level.levelgen.synth.PerlinNoise')
 /** @type {DeobfRef<RandomSource>?} */
-const RandomSource = DeobfRef.Class('net.minecraft.util.RandomSource')
+const RandomSource = DeobfRef.class('net.minecraft.util.RandomSource')
 
 // ==================== 长类名集中管理 ====================
 const IMPORT = {
@@ -744,7 +745,8 @@ const OilMarkerState = {
 
 /** 油田标记：按区块油量绘制矩形纹理，含未扫描遮罩 */
 class OilMarker {
-    static utils = Java.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static ClientUtils = DeobfRef.type('xaero.hud.minimap.config.util.MinimapConfigClientUtils')
+    static Settings = DeobfRef.type('xaero.minimap.XaeroMinimap')?.instance?.getSettings()
     static minimap = Java.type('xaero.hud.minimap.BuiltInHudModules').MINIMAP
 
     /**
@@ -855,8 +857,10 @@ class OilMarker {
                 const [graphics, e, info, localX, localY, scale, isWorldMap, hovered] = args
                 const tex = state.texture
                 if (!tex) return false
-                const isLocked = OilMarker.utils.getEffectiveNorthLocked(
-                    OilMarker.minimap.getCurrentSession().getProcessor().getMinimapSize() / 2, 0)
+                let mapSize = OilMarker.minimap.getCurrentSession().getProcessor().getMinimapSize()
+                let shape = OilMarker.Settings.minimapShape
+                let isLocked = (OilMarker.ClientUtils?.getEffectiveNorthLocked(mapSize / 2, 0))
+                    || (OilMarker.Settings?.getLockNorth && OilMarker.Settings.getLockNorth(mapSize / 2, shape))
                 const half = (e.size / 2) * scale
                 const deg = isWorldMap || isLocked ? 0 : -90 - (Player.getPlayer().getYaw() ?? 0)
                 const isUnknown = (state === OilMarkerState.UNKNOWN)
@@ -1185,7 +1189,7 @@ const OilStore = {
 // ==================== 油量查询 ====================
 const BiomeHelper = {
     minecraft: null, registryAccess: null, BIOME: null, registry: null,
-    Registries: DeobfRef.Class(
+    Registries: DeobfRef.class(
         'net.minecraft.core.registries.Registries', 'net.minecraft.class_7924',
         'net.minecraft.registry.RegistryKeys', 'net.minecraft.src.C_256686_'),
     getRegistryAccess() {
@@ -1273,7 +1277,7 @@ const CDGOil = {
             if (denytag && biome.containsTag(denytag)) return 0
             if (oiltag && biome.containsTag(oiltag)) isHighInOil = true
         }
-        
+
         if ((isHighInOil && CDGConfig?.DISABLE_HIGH_OIL_CHUNKS?.get())
             || (!isHighInOil && CDGConfig?.DISABLE_NORMAL_OIL_CHUNKS?.get()))
             return 0
@@ -1293,7 +1297,7 @@ const CDGOil = {
         if (stopRequested) throw new Error('Stop Scan')
         const fast = this.getBaseOilAmountFast(x, z, this.fullSampling)
         if (fast < CDGConfig.OIL_CHUNK_INFINITE_THRESHOLD.get()) return fast
-        
+
         return this.level ? this.getBaseOilAmount(x, z) : this.getBaseOilAmountFast(x, z, true)
     },
     /** @param {number} cx @param {number} cz @param {number} innerRadius */
@@ -1397,7 +1401,7 @@ function main() {
     // 刷新驱动
     let refreshCounter = 0
     refresh_listener = bus.addListener(() => {
-        if (++refreshCounter % (scanning ? 20 : REFRESH_INTERVAL_TICKS)!== 0) return
+        if (++refreshCounter % (scanning ? 20 : REFRESH_INTERVAL_TICKS) !== 0) return
         if (!marker) return
         let center = getCurrentCenter()
         if (!center) return

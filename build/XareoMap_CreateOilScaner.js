@@ -1256,7 +1256,7 @@ const CDGOil = {
     /** @param {number} x @param {number} z @returns {number} */
     getBaseOilAmountFast(x, z, fullSampling) {
         let seed = this.level ? this.getSeed() : CUSTOM_SEED
-        if (!seed) throw new Error('Not Found Seed')
+        if (seed == null) throw new Error('Not Found Seed')
         let px = x << 4, pz = z << 4
         let denytag = CDGTags?.DENY_OIL_BIOMES
         let oiltag = CDGTags?.OIL_BIOMES

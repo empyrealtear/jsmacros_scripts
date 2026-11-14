@@ -4,6 +4,7 @@
 // 依赖模组: jsmacros、老虎机（Slot Machine)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 添加自动填充金币功能（可搭配背包补货升级使用）
+// 更新内容: v1.2 附近老虎机批量抽奖
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -33,14 +34,18 @@ try {
 
 const SlotMachine = {
     screenType: 'net.micaxs.slotmachine.screen.ServerSlotMachineScreen',
+    $id: 'slotmachinemod:server_slot_machine',
+    $coin: 'createdeco:gold_coin',
     $PacketHandler: Java.type('net.micaxs.slotmachine.network.PacketHandler'),
     $ServerSlotsC2SPacket: Java.type('net.micaxs.slotmachine.network.packet.ServerSlotsC2SPacket'),
+    $ServerClaimPayoutC2SPacket: Java.type('net.micaxs.slotmachine.network.packet.ServerClaimPayoutC2SPacket'),
     $ServerSlotMachineMenu: Java.type('net.micaxs.slotmachine.screen.ServerSlotMachineMenu'),
-    getBlockPos() { return this.$ServerSlotMachineMenu.blockEntity.m_58899_() },
-    send(value) {
-        this.$PacketHandler.sendToServer(
-            new this.$ServerSlotsC2SPacket(
-                this.getBlockPos(), value))
+    getGuiBlockPos() { return this.$ServerSlotMachineMenu.blockEntity.m_58899_() },
+    send(value, pos) {
+        this.$PacketHandler.sendToServer(new this.$ServerSlotsC2SPacket(pos ?? this.getGuiBlockPos(), value))
+    },
+    claim(pos) {
+        this.$PacketHandler.sendToServer(new this.$ServerClaimPayoutC2SPacket(pos ?? this.getGuiBlockPos()))
     }
 }
 
@@ -49,47 +54,68 @@ if (isEnabled()) {
     listenters.push(JsMacros.on('OpenScreen', JavaWrapper.methodToJava((e, ctx) => {
         let screen = Hud.getOpenScreen()
         if (!screen) return
-
         if (Reflection.getClassName(screen) == SlotMachine.screenType) {
-            Client.runOnMainThread(JavaWrapper.methodToJava(() => screen.getWidth()), true, 3000)
-            const toNumber = (str) => { let n = parseInt(str); return Number.isFinite(n) ? n : null }
-            let scale = Hud.getScaleFactor()
-            let width = Hud.getWindowWidth() / scale, height = Hud.getWindowHeight() / scale
-            while (isEnabled()) {
-                screen = Hud.getOpenScreen()
-                if (!(screen && Reflection.getClassName(screen) == SlotMachine.screenType)) break
-                try {
-                    let inv = Player.openInventory()
-                    if (inv) {
-                        if (inv.getSlot(36).getCount() == 0)
-                            for (let i of inv.getSlots(['main', 'hotbar'])) {
-                                if (inv.getSlot(i).getItemId() == 'createdeco:gold_coin') {
-                                    inv.swap(i, 36)
-                                    Client.waitTick(5)
-                                    break
-                                }
-                            }
-                        if (inv.getSlot(37).getCount() > 0) {
-                            inv.dropSlot(37, true)
-                            Client.waitTick(5)
-                        }
-                        if (inv.getSlot(36).getCount() > 0 && inv.getSlot(37).getCount() == 0) {
-                            SlotMachine.send(true)
-                            Client.waitTick()
-                            SlotMachine.send(false)
-                        }
+            let inv = Player.openInventory()
+            if (inv) {
+                // 补金币，保留1个金币用于占位
+                if (inv.getSlot(36).getCount() == 0)
+                    for (let i of inv.findItem(SlotMachine.$coin)) {
+                        inv.click(i, 0)
+                        Client.waitTick()
+                        inv.click(i, 1)
+                        Client.waitTick()
+                        inv.click(36, 0)
+                        break
                     }
-                } catch (e) {
-                    mclog(e)
-                    break
-                }
-                Client.waitTick(11) // 最低间隔要求500ms，否则服务端会开始记录玩家及坐标
+                inv.close()
             }
         }
     })))
 
+    let scanner = World.getWorldScanner().withStringBlockFilter().contains(SlotMachine.$id).build()
+    let spinState = false
     _listener.on(() => {
-        // 循环代码
+        if (spinState) return
+        /** @type {Pos3D[]} */
+        let blocks = Array.from(scanner.scanAroundPlayer(3))
+        if (blocks.length > 0)
+            spinState = true
+        let ply = Player.getPlayer().getBlockPos()
+        for (let pos of blocks) {
+            let block = World.getBlock(pos)
+            let bpos = block.getBlockPos()
+            let items = block.getNBT().resolve('inventory.Items').get(0).asListHelper()
+            let hasCoin = false, hasReward = false
+            for (let i = 0; i < items?.length(); i++) {
+                let slot = items.get(i).resolve('Slot').get(0).asNumberHelper().asNumber()
+                if (slot == 0)
+                    hasCoin = true
+                else
+                    hasReward = true
+            }
+            if (hasCoin) {
+                // 抽奖
+                SlotMachine.send(true, bpos.getRaw())
+                Client.waitTick()
+                SlotMachine.send(false, bpos.getRaw())
+            }
+            if (hasReward) {
+                // 领奖
+                SlotMachine.claim(bpos.getRaw())
+                Client.waitTick()
+            }
+            if (bpos.distanceTo(ply) <= Player.getReach()) {
+                // 给可触及的老虎机补金币
+                let inv = Player.openInventory()
+                if (inv.contains(SlotMachine.$coin) && !hasCoin) {
+                    inv?.close() // 关闭当前打开界面以免冲突
+                    Player.getInteractionManager().interactBlock(pos.x, pos.y, pos.z, 'up', false)
+                    Client.waitTick(5)
+                }
+            }
+        }
+        Client.waitTick(11)
+        spinState = false
     }).offHandle = () => {
         listenters.forEach(v => JsMacros.off(v))
         listenters = []

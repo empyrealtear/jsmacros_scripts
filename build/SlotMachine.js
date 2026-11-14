@@ -1,10 +1,10 @@
 // 脚本名称: 老虎机抽奖
-// 适配版本：forge 1.20.1
-// 功能介绍: 老虎机界面挂机抽奖
+// 功能介绍: 老虎机界面挂机抽奖（支持远程绑定抽奖）
 // 依赖模组: jsmacros、老虎机（Slot Machine)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 添加自动填充金币功能（可搭配背包补货升级使用）
 // 更新内容: v1.2 附近老虎机批量抽奖
+// 更新内容: v1.3 可配置绑定机器、抽奖模式等参数
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -49,16 +49,137 @@ const SlotMachine = {
     }
 }
 
+// ============ 持久化存储：绑定坐标 + 运行状态 ============
+// 数据结构:
+// {
+//   "binds": { "<维度>": { "x,y,z": 时间戳 } },
+//   "state": { "running": false, "bindOnly": false }
+// }
+// 单人存档写入 saves/<存档名>/data/，多人服务器写入脚本目录 data/ 并按世界ID区分
+class BindStore {
+    constructor(path) {
+        this._path = path
+        this.cache = null
+        this.latest_path = null
+    }
+    get path() { return typeof this._path == 'function' ? this._path() : this._path }
+
+    load() {
+        let path = this.path
+        if (this.cache && path == this.latest_path) return this.cache
+        this.cache = { binds: {}, state: { running: false, bindOnly: false } }
+        try {
+            if (FS.exists(path)) {
+                let raw = FS.open(path).read()
+                if (raw && raw.length > 0) {
+                    let obj = JSON.parse(raw)
+                    this.cache.binds = obj?.binds ?? {}
+                    this.cache.state = {
+                        running: !!obj?.state?.running,
+                        bindOnly: !!obj?.state?.bindOnly
+                    }
+                }
+            }
+        } catch (e) {
+            mclog(`§c[老虎机] 读取绑定失败: ${e} ${path}`, 12)
+        }
+        this.latest_path = path
+        return this.cache
+    }
+    save() {
+        if (!this.cache) return
+        try {
+            let path = this.path
+            let dir = path.substring(0, path.lastIndexOf('/'))
+            if (dir && !FS.exists(dir)) FS.makeDir(dir)
+            FS.open(path).write(JSON.stringify(this.cache))
+        } catch (e) {
+            mclog(`§c[老虎机] 保存绑定失败: ${e} ${this.path}`, 12)
+        }
+    }
+    // ---- 绑定坐标 ----
+    has(dim, key) { return this.load().binds[dim]?.[key] != null }
+    toggle(dim, key) {
+        const cache = this.load()
+        if (!cache.binds[dim]) cache.binds[dim] = {}
+        let now
+        if (cache.binds[dim][key] !== undefined) { delete cache.binds[dim][key]; now = false }
+        else { cache.binds[dim][key] = Date.now(); now = true }
+        this.save()
+        return now
+    }
+    list(dim) {
+        let out = []
+        for (let [d, map] of Object.entries(this.load().binds)) {
+            if (dim != null && d !== dim) continue
+            for (let key of Object.keys(map)) {
+                let [x, y, z] = key.split(',').map(Number)
+                out.push({ dim: d, x, y, z })
+            }
+        }
+        return out
+    }
+    // ---- 运行状态 ----
+    getState() { return { ...this.load().state } }
+    setState(patch) {
+        const cache = this.load()
+        cache.state = { ...cache.state, ...patch }
+        this.save()
+        return cache.state
+    }
+}
+
+const bindStore = new BindStore(
+    () => {
+        const id = World.getWorldIdentifier()
+        // 单人存档目录
+        const saveDir = file.getParent().replace(/config\\jsMacros.+/, '') + `saves/${id.replace('LOCAL_', '')}`
+        // 单人：写存档内 data/；多人：写脚本目录 data/ 并带世界 ID
+        return FS.exists(saveDir)
+            ? `${saveDir}/data/slotmachine_binds.json`
+            : `data/slotmachine_binds_${id}.json`
+    }
+)
+const getDimension = () => World.getDimension().toString()
+const posKey = (p) => `${p.x},${p.y},${p.z}`
+function toggleBind(bpos) {
+    let dim = getDimension()
+    let key = posKey(bpos)
+    if (bindStore.toggle(dim, key))
+        mclog(`§a已绑定 §f${key} §7(${dim})`)
+    else
+        mclog(`§e已解绑 §f${key} §7(${dim})`)
+}
+
 if (isEnabled()) {
+    // ============ 运行状态（持久化到文件）============
+    const state = bindStore.getState()
+    let running = state.running
+    let bindOnly = state.bindOnly
+    const setRunning = (v) => {
+        running = v ?? !running
+        bindStore.setState({ running })
+        mclog(running ? '§a开始抽奖' : '§e已暂停抽奖')
+        return running
+    }
+    const setBindOnly = (v) => {
+        bindOnly = v ?? !bindOnly
+        bindStore.setState({ bindOnly })
+        mclog(bindOnly ? '§a忽略周边' : '§e包括周边')
+        return bindOnly
+    }
+    mclog(running ? '§a抽奖运行中' : '§7抽奖已暂停')
+
     let listenters = []
+
     listenters.push(JsMacros.on('OpenScreen', JavaWrapper.methodToJava((e, ctx) => {
         let screen = Hud.getOpenScreen()
         if (!screen) return
         if (Reflection.getClassName(screen) == SlotMachine.screenType) {
-            let inv = Player.openInventory()
-            if (inv) {
-                // 补金币，保留1个金币用于占位
-                if (inv.getSlot(36).getCount() == 0)
+            // 补金币仅在运行中才执行
+            if (running) {
+                let inv = Player.openInventory()
+                if (inv && inv.getSlot(36).getCount() == 0) {
                     for (let i of inv.findItem(SlotMachine.$coin)) {
                         inv.click(i, 0)
                         Client.waitTick()
@@ -67,53 +188,132 @@ if (isEnabled()) {
                         inv.click(36, 0)
                         break
                     }
-                inv.close()
+                    inv.close()
+                }
             }
+            let scale = Hud.getScaleFactor()
+            let width = Hud.getWindowWidth() / scale
+            let height = Hud.getWindowHeight() / scale
+            let imgWidth = Reflection.getReflect(screen).get('f_97726_') ?? 176
+            let imgHeight = Reflection.getReflect(screen).get('f_97727_') ?? 166
+            /** @type {BlockPosHelper} */
+            let bpos = JavaUtils.getHelperFromRaw(SlotMachine.getGuiBlockPos())
+            let p3 = bpos.toPos3D()
+            let dim = getDimension()
+            let key = posKey(p3)
+
+            // 绑定按钮（颜色反映是否已绑定）
+            const bindLabelOf = () => bindStore.has(dim, key) ? '§a★' : '§c★'
+            const bindTipsOf = () => `${bindStore.has(dim, key) ? '§c解绑' : '§a绑定'} §8(§7${key}§8)`
+            let bindBtn = screen.addButton(
+                (width / 2 + imgWidth / 2 - 20) | 0,
+                (height / 2 - imgHeight / 2 + 5) | 0,
+                12, 10, bindLabelOf(),
+                JavaWrapper.methodToJava((b) => {
+                    toggleBind(p3)
+                    b.setLabel(bindLabelOf())
+                    b.setTooltip(bindTipsOf())
+                })
+            ).addTooltip(bindTipsOf())
+
+            // 运行开关按钮（颜色反映运行状态：绿=运行中，红=暂停）
+            const runLabelOf = () => running ? '§a■' : '§c▶'
+            const runTipsOf = () => running ? '§c暂停抽奖' : '§a开始抽奖'
+            let runBtn = screen.addButton(
+                (width / 2 + imgWidth / 2 - 20) | 0,
+                (height / 2 - imgHeight / 2 + 18) | 0,
+                12, 10, runLabelOf(),
+                JavaWrapper.methodToJava((b) => {
+                    setRunning()
+                    b.setLabel(runLabelOf())
+                    b.setTooltip(runTipsOf())
+                })
+            ).addTooltip(runTipsOf())
+            // 周边开关按钮（颜色反映是否包含周边：绿=包括，红=忽略）
+            const modeLabelOf = () => bindOnly ? '§a◎' : '§c●'
+            const modeTipsOf = () => bindOnly ? '§a当前：忽略周边' : '§c当前：包括周边'
+            let modeBtn = screen.addButton(
+                (width / 2 + imgWidth / 2 - 20) | 0,
+                (height / 2 - imgHeight / 2 + 31) | 0,
+                12, 10, modeLabelOf(),
+                JavaWrapper.methodToJava((b) => {
+                    setBindOnly()
+                    b.setLabel(modeLabelOf())
+                    b.setTooltip(modeTipsOf())
+                })
+            ).addTooltip(modeTipsOf())
         }
     })))
 
     let scanner = World.getWorldScanner().withStringBlockFilter().contains(SlotMachine.$id).build()
     let spinState = false
-    _listener.on(() => {
-        if (spinState) return
-        /** @type {Pos3D[]} */
-        let blocks = Array.from(scanner.scanAroundPlayer(3))
-        if (blocks.length > 0)
-            spinState = true
+
+    /** 读取老虎机方块内的物品状态
+     * @param {BlockPosHelper} pos
+     */
+    const readSlots = (pos) => {
+        let block = World.getBlock(pos)
+        if (!block) return null
+        let nbt = block.getNBT()
+        let items = nbt?.resolve('inventory.Items').get(0).asListHelper()
+        let hasCoin = false, hasReward = false
+        for (let i = 0; i < items?.length(); i++) {
+            let slot = items.get(i).resolve('Slot').get(0).asNumberHelper().asNumber()
+            if (slot == 0) hasCoin = true
+            else hasReward = true
+        }
+        return { hasCoin, hasReward }
+    }
+
+    /** 对指定坐标执行一次抽奖/领奖/补金币
+     * @param {BlockPosHelper} pos
+     */
+    const processMachine = (pos) => {
+        let st = readSlots(pos)
+        if (!st) return
+        if (st.hasCoin) {
+            SlotMachine.send(true, pos.getRaw())
+            Client.waitTick()
+            SlotMachine.send(false, pos.getRaw())
+        }
+        if (st.hasReward) {
+            SlotMachine.claim(pos.getRaw())
+            Client.waitTick()
+        }
         let ply = Player.getPlayer().getBlockPos()
-        for (let pos of blocks) {
-            let block = World.getBlock(pos)
-            let bpos = block.getBlockPos()
-            let items = block.getNBT().resolve('inventory.Items').get(0).asListHelper()
-            let hasCoin = false, hasReward = false
-            for (let i = 0; i < items?.length(); i++) {
-                let slot = items.get(i).resolve('Slot').get(0).asNumberHelper().asNumber()
-                if (slot == 0)
-                    hasCoin = true
-                else
-                    hasReward = true
-            }
-            if (hasCoin) {
-                // 抽奖
-                SlotMachine.send(true, bpos.getRaw())
-                Client.waitTick()
-                SlotMachine.send(false, bpos.getRaw())
-            }
-            if (hasReward) {
-                // 领奖
-                SlotMachine.claim(bpos.getRaw())
-                Client.waitTick()
-            }
-            if (bpos.distanceTo(ply) <= Player.getReach()) {
-                // 给可触及的老虎机补金币
-                let inv = Player.openInventory()
-                if (inv.contains(SlotMachine.$coin) && !hasCoin) {
-                    inv?.close() // 关闭当前打开界面以免冲突
-                    Player.getInteractionManager().interactBlock(pos.x, pos.y, pos.z, 'up', false)
-                    Client.waitTick(5)
-                }
+        let screen = Hud.getOpenScreen()
+        if ((!screen || (screen && Reflection.getClassName(screen) == SlotMachine.$id))
+            && pos.distanceTo(ply) <= Player.getReach()) {
+            let inv = Player.openInventory()
+            if (inv.contains(SlotMachine.$coin) && !st.hasCoin) {
+                inv?.close()
+                Player.getInteractionManager().interactBlock(
+                    pos.getX(), pos.getY(), pos.getZ(), 'up', false)
+                Client.waitTick(3)
             }
         }
+    }
+
+    // 收集本轮要处理的机器坐标（去重）
+    // 全部模式：周边扫描 + 绑定列表；仅绑定模式：绑定列表
+    const collectTargets = () => {
+        let dim = getDimension()
+        let map = new Map()
+        if (!bindOnly) {
+            for (let pos of Array.from(scanner.scanAroundPlayer(3)))
+                map.set(posKey(pos), PositionCommon.createBlockPos(pos.x, pos.y, pos.z))
+        }
+        for (let b of bindStore.list(dim))
+            map.set(posKey(b), PositionCommon.createBlockPos(b.x, b.y, b.z))
+        return Array.from(map.values())
+    }
+
+    _listener.on(() => {
+        if (!running) return
+        if (spinState) return
+        spinState = true
+        for (let rawPos of collectTargets())
+            processMachine(rawPos)
         Client.waitTick(11)
         spinState = false
     }).offHandle = () => {

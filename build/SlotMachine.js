@@ -1,5 +1,5 @@
 // 脚本名称: 老虎机抽奖
-// 功能介绍: 老虎机界面挂机抽奖（支持远程绑定抽奖）
+// 功能介绍: 老虎机界面挂机抽奖（仅单人支持远程强加载区块绑定抽奖）
 // 依赖模组: jsmacros、老虎机（Slot Machine)
 // 更新内容: v1.0 初始化脚本
 // 更新内容: v1.1 添加自动填充金币功能（可搭配背包补货升级使用）
@@ -25,6 +25,7 @@ const _listener = {
 const mclog = (msg, color = 7) => Chat.log(`§7[§5${scriptName}§7] §${(color % 16).toString(16)}${msg}`)
 const isEnabled = () => GlobalVars.getBoolean(_enabled) && GlobalVars.getInt(_session) == session
 const toggleEnabled = (v) => mclog(GlobalVars.putBoolean(_enabled, v ?? !isEnabled()) ? "启用" : "关闭")
+const _dev = false
 
 try {
     JsMacros.assertEvent(event, 'Service')
@@ -151,9 +152,8 @@ function toggleBind(bpos) {
         mclog(`§e已解绑 §f${key} §7(${dim})`)
 }
 const ServerLevel = {
-    level: null,
     $BlockDataHelper: Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.world.BlockDataHelper'),
-    init() {
+    level() {
         try {
             let mc = Client.getMinecraft()
             let server = mc.m_91092_()
@@ -161,12 +161,12 @@ const ServerLevel = {
             let keys = server.m_129784_()
             for (let i of keys)
                 if (`${i.m_135782_()}` == dim)
-                    this.level = server.m_129880_(i)
+                    return server.m_129880_(i)
         } catch { }
-        return this
+        return null
     },
-    getChunkAt(blockpos) { return this.level?.m_46745_(blockpos) },
-    getBlockState(blockpos) { return this.level?.m_8055_(blockpos) },
+    getChunkAt(blockpos) { return this.level()?.m_46745_(blockpos) },
+    getBlockState(blockpos) { return this.level()?.m_8055_(blockpos) },
     getBlockEntity(blockpos) { return this.getChunkAt(blockpos)?.m_7702_(blockpos) },
     /** @returns {BlockDataHelper} */
     getBlockAt(blockpos) {
@@ -179,7 +179,6 @@ const ServerLevel = {
 }
 
 if (isEnabled()) {
-    ServerLevel.init()
     // ============ 运行状态（持久化到文件）============
     const state = bindStore.getState()
     let running = state.running
@@ -208,6 +207,7 @@ if (isEnabled()) {
                 let inv = Player.openInventory()
                 if (inv && inv.getSlot(36).getCount() == 0) {
                     for (let i of inv.findItem(SlotMachine.$coin)) {
+                        if (inv.getSlot(i).getCount() <= 1) continue
                         inv.click(i, 0)
                         Client.waitTick()
                         inv.click(i, 1)
@@ -299,13 +299,19 @@ if (isEnabled()) {
         let ply = Player.getPlayer().getBlockPos()
         let screen = Hud.getOpenScreen()
         if ((!screen || (screen && Reflection.getClassName(screen) == SlotMachine.screenType))) {
-            if (pos.distanceTo(ply) <= Player.getReach()) {
+            if (_dev && ServerLevel.level()) {
+                const ItemStackHelper = Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
+                let handler = Reflection.getReflect(st.blockEntity).get('itemHandler')
+                let coin = new ItemStackHelper(SlotMachine.$coin, 64).getRaw()
+                handler.insertItem(0, coin, false)
+                Client.waitTick(3)
+            } else if (pos.distanceTo(ply) <= Player.getReach()) {
                 let inv = Player.openInventory()
-                if (inv.contains(SlotMachine.$coin) && !st.hasCoin) {
+                if (inv.getItemCount().getOrDefault(SlotMachine.$coin, 0) > 1 && !st.hasCoin) {
                     inv?.close()
                     Player.getInteractionManager().interactBlock(
                         pos.getX(), pos.getY(), pos.getZ(), 'up', false)
-                    Client.waitTick(3)
+                    Client.waitTick(5)
                 }
             }
         }

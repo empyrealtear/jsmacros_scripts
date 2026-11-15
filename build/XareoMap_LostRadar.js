@@ -1169,7 +1169,7 @@ const JEIAPI = {
                     let [namespace, path] = ik.split(':')
                     map[namespace] ??= new Set()
                     let chance = [iv.chance].flat(2).map(z => (z * 100).toFixed(2) + '%').join(',')
-                    map[namespace].add(`    §8- §f${iv.name}§f: ${iv.count} (${chance})`)
+                    map[namespace].add(`    §8- §f${iv.name}§f: ${iv.count} (${chance}) §7[${v.name.split('|').splice(1).join('-')}]`)
                 }
             }
         return Object.entries(map).sort((a, b) => {

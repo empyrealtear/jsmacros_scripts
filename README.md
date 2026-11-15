@@ -30,11 +30,14 @@
 - Xaero地图自定义渲染: [XaeroMapOverlay.js](./lib/XaeroMapOverlay.js)
 
 ### 应用类
+- 机动护目镜: [CreateGoggles.js
+](./build/CreateGoggles.js)
 - 机动柴油动力油田扫描: [XareoMap_CreateOilScaner.js
 ](./build/XareoMap_CreateOilScaner.js
 )、[柴油动力油田预览(需用扫描脚本缓存数据)](https://empyrealtear.github.io/jsmacros_scripts/page/柴油动力油田预览.html)
 - 沉浸工程矿脉预览: [XareoMap_IEVeins.js](./build/XareoMap_IEVeins.js)、[沉浸工程矿脉预览(网页版)](https://empyrealtear.github.io/jsmacros_scripts/page/沉浸工程矿脉预览.html)
 - 失落城市地图雷达: [XareoMap_LostRadar.js](./build/XareoMap_LostRadar.js)
+- 亡者世界老虎机：[SlotMachine.js](./build/SlotMachine.js)
 - 自然指南针自定义搜索中心（forge1.20.1）: [NaturesCompass.js](./build/NaturesCompass.js)
 - Baritone路径规划渲染: [BaritoneRender.js](./build/BaritoneRender.js)
 - 潮汐自动钓鱼: [TideFishMinigame.js](./build/TideFishMinigame.js)

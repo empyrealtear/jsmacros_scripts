@@ -17,7 +17,7 @@ const _listener = {
         this.tick = JsMacros.on('Tick', JavaWrapper.methodToJava(() => {
             if (!isEnabled()) return this.off()
             if (++this.counter % this.step != 0) return
-            handle?.()
+            try { handle?.() } catch {}
         }))
         return this
     },
@@ -80,10 +80,10 @@ const SlotMachine = {
             Client.waitTick()
             this.send(false, pos.getRaw())
         }
-        // if (st.hasReward) {
-        //     this.claim(pos.getRaw())
-        //     Client.waitTick()
-        // }
+        if (st.hasReward) {
+            this.claim(pos.getRaw())
+            Client.waitTick()
+        }
         let ply = Player.getPlayer().getBlockPos()
         let screen = Hud.getOpenScreen()
         if (!screen) {
@@ -95,8 +95,8 @@ const SlotMachine = {
                 Client.waitTick(3)
             } else if (pos.distanceTo(ply) <= Player.getReach()) {
                 let inv = Player.openInventory()
-                if (inv.getItemCount().getOrDefault(this.$coin, 0) > 1 && !st.hasCoin) {
-                    inv?.close()
+                if (inv?.getItemCount().getOrDefault(this.$coin, 0) > 1 && !st.hasCoin) {
+                    // inv?.close()
                     Player.getInteractionManager().interactBlock(
                         pos.getX(), pos.getY(), pos.getZ(), 'up', false)
                     Client.waitTick(5)

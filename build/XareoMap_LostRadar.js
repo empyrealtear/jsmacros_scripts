@@ -13,6 +13,7 @@
 // 更新内容: v1.8 添加悬浮窗区域显示，纹理添加建筑级别
 // 更新内容: v1.9 修复ALI缓存路径异常，添加预览战利品模式切换按钮，优化建筑注册提示条件
 // 更新内容: v1.9.1 修复进存档前服务先触发脚本导致的异常，修复切换存档标记缓存未同步切换的问题
+// 更新内容: v1.9.2 高亮/战利品模式开关持久化到 visited 存储文件
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -961,7 +962,7 @@ class Draw2DUtils {
 }
 
 const utils = {
-    /** @returns {ClientLevel} 主世界level */
+    /** @returns {ClientLevel} 世界level */
     level() { return World.getRaw() },
     /** @returns {string?} "cx,cz" 获取玩家当前所在区块 key */
     getChunkKey() {
@@ -1042,10 +1043,9 @@ const DCAdvancement = {
 /** JEI ALI战利品信息 */
 const JEIAPI = {
     path: 'data/ali_chest_loot.json', recipes: [], localRecipes: {}, inited: false,
-    key: `${scriptName}:ALIOffline`,
     priorityKeys: ['artifacts', 'nameless_trinkets', 'legendarysurvivaloverhaul', 'tacz', 'secruitycraft'],
-    isOffline() { return GlobalVars.getBoolean(this.key) },
-    toggleOffline(v) { return GlobalVars.putBoolean(this.key, v ?? !this.isOffline()) },
+    isOffline() { return visitedStore.getOffline() },
+    toggleOffline(v) { return visitedStore.setOffline(v ?? !this.isOffline()) },
     init(offline) {
         if (this.inited) return this
         this.jei = DeobfRef.type('mezz.jei.common.Internal')?.getJeiRuntime()
@@ -1209,7 +1209,7 @@ const LootrPanel = {
     }
 }
 
-/** 已去过区块存储 */
+/** 已去过区块存储（兼持久化开关，写同一文件） */
 class VisitedStore {
     /**
      * @param {string|string[]|() => string|string[]} readPaths 读取路径（按优先级）
@@ -1218,7 +1218,7 @@ class VisitedStore {
     constructor(readPaths, writePath) {
         /** @type {string|string[]|() => string|string[]} */ this._readPaths = readPaths
         /** @type {string|() => string|undefined} */ this._writePath = writePath
-        /** @type {Object<string, Object<string, number>>?} 维度 → { 区块key: 时间戳 } */
+        /** @type {Object<string, any>?} 顶层：维度 → { 区块key: 时间戳 }，外加 __prefs 开关区 */
         this.cache = null
         /** @type {string} */
         this.latest_path = null
@@ -1292,6 +1292,41 @@ class VisitedStore {
         this.save()
         return now
     }
+    /** 开关区（顶层 __prefs） @returns {Object<string, any>} */
+    prefs() {
+        const cache = this.load()
+        if (!cache.__prefs || typeof cache.__prefs !== 'object') cache.__prefs = {}
+        return cache.__prefs
+    }
+    /**
+     * 读取开关
+     * @param {string} key
+     * @param {*} def 默认值
+     * @returns {*}
+     */
+    getPref(key, def) {
+        const v = this.prefs()[key]
+        return v === undefined ? def : v
+    }
+    /**
+     * 写入开关（值未变则不落盘）
+     * @param {string} key
+     * @param {*} v
+     * @returns {*} 写入后的值
+     */
+    setPref(key, v) {
+        const p = this.prefs()
+        if (p[key] === v) return v
+        p[key] = v
+        this.save()
+        return v
+    }
+    /** 标记高亮开关（默认开） @returns {boolean} */
+    getHighlight() { return !!this.getPref('highlight', true) }
+    setHighlight(v) { return !!this.setPref('highlight', !!v) }
+    /** 战利品展示模式（true=侧边栏，false=JEI；默认 JEI） @returns {boolean} */
+    getOffline() { return !!this.getPref('offlineLoot', false) }
+    setOffline(v) { return !!this.setPref('offlineLoot', !!v) }
 }
 
 /** 标记状态（附带纹理初始化） */
@@ -1349,7 +1384,7 @@ class RadarMarker {
         /** @type {string?} */ this.lastSyncKey = null
         /** @type {Draw2D} */ this.d2d = Hud.createDraw2D()
         /** @type {boolean} 渲染开关 */
-        this.enabled = GlobalVars.getBoolean(`${scriptName}:Hightlight`)
+        this.enabled = store.getHighlight()
         /** @type {string} render方法名 */
         this.render = DeobfRef.methodName(ModImport.Renderable, 'render', 'method_25394', 'm_88315_')
     }
@@ -1358,7 +1393,7 @@ class RadarMarker {
     /** 切换开关 */
     toggle(v) {
         this.enabled = v ?? !this.enabled
-        GlobalVars.putBoolean(`${scriptName}:Hightlight`, this.enabled)
+        this.store.setHighlight(this.enabled)
         if (!this.enabled) this.clear()
         return this.enabled
     }
@@ -1666,7 +1701,7 @@ function main() {
                 new Button(tipDraw.target, {
                     x: 30, y: 8, width: 20, height: 16,
                     enabled: (self) => JEIAPI.isOffline(), text: (self) => self.enabled ? '侧边' : 'ALI',
-                    onClick: (self, event) => JEIAPI.toggleOffline(),
+                    onClick: (self, event) => { JEIAPI.toggleOffline(); self.update() },
                     onHover: (self, event) => tipDraw.tooltips = [{
                         tips: ['战利品展示模式', `  §8-§f 当前模式: ${self.enabled ? '侧边栏' : 'JEI'}`]
                     }]
@@ -1679,6 +1714,7 @@ function main() {
                         let cx = guimap.mouseBlockPosX >> 4, cz = guimap.mouseBlockPosZ >> 4
                         let key = `${cx},${cz}`, dim = World.getDimension()
                         marker.toggle()
+                        self.update()
                         marker.rebuild(cx, cz, dim, true)
                     },
                     onHover: (self, event) => {
@@ -1709,7 +1745,7 @@ function main() {
                 if (event.consumed) return
                 buildingHover(event)
                 // ---- H 键：切换标记渲染 ----
-                if (event.click(Event.KEY_H)) { marker.toggle() && marker.rebuild(cx, cz, dim, true) }
+                if (event.click(Event.KEY_H)) { marker.toggle(); btns[1]?.update(); marker.rebuild(cx, cz, dim, true) }
                 else if (event.click('key.keyboard.a')) { LootrPanel.prevpage() }
                 else if (event.click('key.keyboard.d')) { LootrPanel.nextpage() }
                 else if (event.click(Event.LEFTCLICK)) {
@@ -1783,7 +1819,7 @@ function teardown() {
 
 // ==================== 全局实例 ====================
 /** 渲染半径（区块） */
-const MARKER_RADIUS = 30
+const MARKER_RADIUS = 25
 const bus = new EventBus()
 const visitedStore = new VisitedStore(
     // 读取路径（按优先级：存档内新路径 → 带存档 ID 旧路径 → 通用旧路径）

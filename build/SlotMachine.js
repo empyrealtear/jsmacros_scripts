@@ -103,6 +103,26 @@ const SlotMachine = {
                 }
             }
         }
+    },
+    cleanInvalidBinds() {
+        let dim = World.getDimension()
+        let binds = bindStore.list(dim) // 获取当前维度所有绑定坐标
+        let plyPos = Player.getPlayer()?.getBlockPos()
+        if (!plyPos) return
+        let removed = []
+        for (let b of binds) {
+            let pos = PositionCommon.createBlockPos(b.x, b.y, b.z)
+            if (pos.distanceTo(plyPos) > 32) continue
+            let blockId = World.getBlock(pos)?.getId()
+            if (blockId !== this.$id) {
+                bindStore.toggle(dim, bindStore.posKey(pos))
+                removed.push(`${b.x},${b.y},${b.z}`)
+            }
+        }
+        if (removed.length > 0) {
+            mclog(`§e已自动清理 ${removed.length} 台失效的绑定机器: §7${removed.join(' | ')}`)
+            highlighter.rebuild(true) // 刷新一下高亮显示
+        }
     }
 }
 
@@ -614,6 +634,7 @@ const highlighter = {
         }
     },
     start() {
+        Hud.clearDraw3Ds()
         if (this.enabled) return
         this.enabled = true
         this.d3d ??= Hud.createDraw3D()
@@ -691,7 +712,7 @@ if (isEnabled()) {
             })
             btns.push(b.buildandAdd())
         }
-        
+
         let uiListener = bus.addListener(event => {
             const cur = Hud.getOpenScreen()
             if (!cur || Reflection.getClassName(cur) != SlotMachine.screenType) {
@@ -699,6 +720,7 @@ if (isEnabled()) {
                 tipDraw.removeTooltip()
                 return
             }
+            Reflection.getReflect(screen).call('stopSpinningSound')
             tipDraw.removeTooltip()
             for (let b of btns) {
                 if (event.consumed) break
@@ -710,6 +732,7 @@ if (isEnabled()) {
     if (bindStore.getState().highlight) highlighter.start()
     let spinState = false
     _listener.on(() => {
+        SlotMachine.cleanInvalidBinds()
         if (!bindStore.getState().running || spinState) return
         spinState = true
         for (let pos of collectTargets())

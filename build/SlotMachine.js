@@ -96,7 +96,7 @@ const SlotMachine = {
             } else if (pos.distanceTo(ply) <= Player.getReach()) {
                 let inv = Player.openInventory()
                 if (inv?.getItemCount().getOrDefault(this.$coin, 0) > 1 && !st.hasCoin) {
-                    // inv?.close()
+                    inv?.close()
                     Player.getInteractionManager().interactBlock(
                         pos.getX(), pos.getY(), pos.getZ(), 'up', false)
                     Client.waitTick(5)

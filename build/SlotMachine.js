@@ -5,6 +5,7 @@
 // 更新内容: v1.1 添加自动填充金币功能（可搭配背包补货升级使用）
 // 更新内容: v1.2 附近老虎机批量抽奖
 // 更新内容: v1.3 可在老虎机界面配置绑定机器、抽奖模式等参数
+// 更新内容: v1.4 添加高亮抽奖目标功能（区分绑定/周边，颜色反映运行状态）
 
 const scriptName = file.getName().replace(/\.(js|ts)$/, '')
 const _session = `${scriptName}:session`
@@ -50,13 +51,31 @@ const SlotMachine = {
     }
 }
 
-// ============ 持久化存储：绑定坐标 + 运行状态 ============
-// 数据结构:
-// {
-//   "binds": { "<维度>": { "x,y,z": 时间戳 } },
-//   "state": { "running": false, "bindOnly": false }
-// }
-// 单人存档写入 saves/<存档名>/data/，多人服务器写入脚本目录 data/ 并按世界ID区分
+const ServerLevel = {
+    $BlockDataHelper: Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.world.BlockDataHelper'),
+    level() {
+        try {
+            let mc = Client.getMinecraft()
+            let server = mc.m_91092_()
+            let dim = World.getDimension()
+            let keys = server.m_129784_()
+            for (let i of keys)
+                if (`${i.m_135782_()}` == dim)
+                    return server.m_129880_(i)
+        } catch { }
+    },
+    getChunkAt(pos) { return this.level()?.m_46745_(pos) },
+    getBlockState(pos) { return this.level()?.m_8055_(pos) },
+    getBlockEntity(pos) { return this.getChunkAt(pos)?.m_7702_(pos) },
+    /** @returns {BlockDataHelper} */
+    getBlockAt(pos) {
+        try {
+            return new this.$BlockDataHelper(this.getBlockState(pos), this.getBlockEntity(pos), pos)
+        } catch { }
+    }
+}
+
+/** 持久化存储：绑定坐标 + 运行状态 */
 class BindStore {
     constructor(path) {
         this._path = path
@@ -64,11 +83,10 @@ class BindStore {
         this.latest_path = null
     }
     get path() { return typeof this._path == 'function' ? this._path() : this._path }
-
     load() {
         let path = this.path
         if (this.cache && path == this.latest_path) return this.cache
-        this.cache = { binds: {}, state: { running: false, bindOnly: false } }
+        this.cache = { binds: {}, state: { running: false, bindOnly: false, highlight: false } }
         try {
             if (FS.exists(path)) {
                 let raw = FS.open(path).read()
@@ -77,7 +95,8 @@ class BindStore {
                     this.cache.binds = obj?.binds ?? {}
                     this.cache.state = {
                         running: !!obj?.state?.running,
-                        bindOnly: !!obj?.state?.bindOnly
+                        bindOnly: !!obj?.state?.bindOnly,
+                        highlight: !!obj?.state?.highlight
                     }
                 }
             }
@@ -98,7 +117,6 @@ class BindStore {
             mclog(`§c[老虎机] 保存绑定失败: ${e} ${this.path}`, 12)
         }
     }
-    // ---- 绑定坐标 ----
     has(dim, key) { return this.load().binds[dim]?.[key] != null }
     toggle(dim, key) {
         const cache = this.load()
@@ -120,13 +138,23 @@ class BindStore {
         }
         return out
     }
-    // ---- 运行状态 ----
     getState() { return { ...this.load().state } }
     setState(patch) {
         const cache = this.load()
         cache.state = { ...cache.state, ...patch }
         this.save()
         return cache.state
+    }
+    posKey(p) {
+        const x = typeof p.getX === 'function' ? p.getX() : p.x
+        const y = typeof p.getY === 'function' ? p.getY() : p.y
+        const z = typeof p.getZ === 'function' ? p.getZ() : p.z
+        return `${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`
+    }
+    toggleBind(pos) {
+        let dim = World.getDimension()
+        let key = this.posKey(pos)
+        mclog(`${this.toggle(dim, key) ? '§a已绑定' : '§e已解绑'} §f${key} §7(${dim})`)
     }
 }
 
@@ -141,42 +169,6 @@ const bindStore = new BindStore(
             : `data/slotmachine_binds_${id}.json`
     }
 )
-const getDimension = () => World.getDimension().toString()
-const posKey = (p) => `${p.x},${p.y},${p.z}`
-function toggleBind(bpos) {
-    let dim = getDimension()
-    let key = posKey(bpos)
-    if (bindStore.toggle(dim, key))
-        mclog(`§a已绑定 §f${key} §7(${dim})`)
-    else
-        mclog(`§e已解绑 §f${key} §7(${dim})`)
-}
-const ServerLevel = {
-    $BlockDataHelper: Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.world.BlockDataHelper'),
-    level() {
-        try {
-            let mc = Client.getMinecraft()
-            let server = mc.m_91092_()
-            let dim = World.getDimension()
-            let keys = server.m_129784_()
-            for (let i of keys)
-                if (`${i.m_135782_()}` == dim)
-                    return server.m_129880_(i)
-        } catch { }
-        return null
-    },
-    getChunkAt(blockpos) { return this.level()?.m_46745_(blockpos) },
-    getBlockState(blockpos) { return this.level()?.m_8055_(blockpos) },
-    getBlockEntity(blockpos) { return this.getChunkAt(blockpos)?.m_7702_(blockpos) },
-    /** @returns {BlockDataHelper} */
-    getBlockAt(blockpos) {
-        try {
-            let state = this.getBlockState(blockpos)
-            let entity = this.getBlockEntity(blockpos)
-            return new this.$BlockDataHelper(state, entity, blockpos)
-        } catch { }
-    }
-}
 
 if (isEnabled()) {
     // ============ 运行状态（持久化到文件）============
@@ -186,17 +178,13 @@ if (isEnabled()) {
     const setRunning = (v) => {
         running = v ?? !running
         bindStore.setState({ running })
-        mclog(running ? '§a开始抽奖' : '§e已暂停抽奖')
         return running
     }
     const setBindOnly = (v) => {
         bindOnly = v ?? !bindOnly
         bindStore.setState({ bindOnly })
-        mclog(bindOnly ? '§a忽略周边' : '§e包括周边')
         return bindOnly
     }
-    mclog(running ? '§a抽奖运行中' : '§7抽奖已暂停')
-
     let listenters = []
     listenters.push(JsMacros.on('OpenScreen', JavaWrapper.methodToJava((e, ctx) => {
         let screen = Hud.getOpenScreen()
@@ -217,53 +205,58 @@ if (isEnabled()) {
                 }
             }
             let scale = Hud.getScaleFactor()
-            let width = Hud.getWindowWidth() / scale, height = Hud.getWindowHeight() / scale
+            let width = (Hud.getWindowWidth() / scale) | 0, height = (Hud.getWindowHeight() / scale) | 0
             let imgWidth = Reflection.getReflect(screen).get('f_97726_') ?? 176
             let imgHeight = Reflection.getReflect(screen).get('f_97727_') ?? 166
             /** @type {BlockPosHelper} */
             let bpos = JavaUtils.getHelperFromRaw(SlotMachine.getGuiBlockPos())
-            let p3 = bpos.toPos3D(), dim = getDimension(), key = posKey(p3)
-
-            // 绑定按钮（颜色反映是否已绑定）
-            const bindLabelOf = () => bindStore.has(dim, key) ? '§a★' : '§c★'
-            const bindTipsOf = () => `${bindStore.has(dim, key) ? '§c解绑' : '§a绑定'} §8(§7${key}§8)`
-            let bindBtn = screen.addButton(
-                (width / 2 + imgWidth / 2 - 20) | 0,
-                (height / 2 - imgHeight / 2 + 5) | 0,
-                12, 10, bindLabelOf(),
-                JavaWrapper.methodToJava((b) => {
-                    toggleBind(p3)
-                    b.setLabel(bindLabelOf())
-                    b.setTooltip(bindTipsOf())
-                })
-            ).addTooltip(bindTipsOf())
-
-            // 运行开关按钮（颜色反映运行状态：绿=运行中，红=暂停）
-            const runLabelOf = () => running ? '§a■' : '§c▶'
-            const runTipsOf = () => running ? '§c暂停抽奖' : '§a开始抽奖'
-            let runBtn = screen.addButton(
-                (width / 2 + imgWidth / 2 - 20) | 0,
-                (height / 2 - imgHeight / 2 + 18) | 0,
-                12, 10, runLabelOf(),
-                JavaWrapper.methodToJava((b) => {
-                    setRunning()
-                    b.setLabel(runLabelOf())
-                    b.setTooltip(runTipsOf())
-                })
-            ).addTooltip(runTipsOf())
-            // 周边开关按钮（颜色反映是否包含周边：绿=包括，红=忽略）
-            const modeLabelOf = () => bindOnly ? '§a◎' : '§c●'
-            const modeTipsOf = () => bindOnly ? '§a当前：忽略周边' : '§c当前：包括周边'
-            let modeBtn = screen.addButton(
-                (width / 2 + imgWidth / 2 - 20) | 0,
-                (height / 2 - imgHeight / 2 + 31) | 0,
-                12, 10, modeLabelOf(),
-                JavaWrapper.methodToJava((b) => {
-                    setBindOnly()
-                    b.setLabel(modeLabelOf())
-                    b.setTooltip(modeTipsOf())
-                })
-            ).addTooltip(modeTipsOf())
+            let dim = World.getDimension(), key = bindStore.posKey(bpos)
+            let btn = { x: (width / 2 + imgWidth / 2 - 20) | 0, y: (height / 2 - imgHeight / 2 + 5) | 0 }
+            /**
+             * 创建一个"状态切换按钮"：点击执行 onToggle，然后刷新 label/tooltip
+             * @param {number} x
+             * @param {number} y
+             * @param {number} w
+             * @param {number} h
+             * @param {() => string} labelOf
+             * @param {() => string} tipOf
+             * @param {() => void} onToggle
+             */
+            const addToggleButton = (x, y, w, h, zIndex, labelOf, tipOf, onToggle) => {
+                return screen.addButton(x, y, w, h, zIndex, labelOf(), JavaWrapper.methodToJava((b) => {
+                    onToggle()
+                    b.setLabel(labelOf())
+                    b.setTooltip(tipOf())
+                })).addTooltip(tipOf())
+            }
+            // 运行开关
+            addToggleButton(btn.x - 14 * 3, btn.y, 12, 12, 60,
+                () => running ? '§a■' : '§c▶',
+                () => running ? '§c暂停抽奖' : '§a开始抽奖',
+                () => setRunning()
+            )
+            // 周边开关
+            addToggleButton(btn.x - 14 * 2, btn.y, 12, 12, 40,
+                () => bindOnly ? '§a◎' : '§c●',
+                () => bindOnly ? '§a当前：忽略周边' : '§c当前：包括周边',
+                () => setBindOnly()
+            )
+            // 高亮开关
+            addToggleButton(btn.x - 14 * 1, btn.y, 12, 12, 30,
+                () => bindStore.getState().highlight ? '§a◆' : '§7◇',
+                () => bindStore.getState().highlight ? '§a当前：高亮显示' : '§c当前：高亮隐藏',
+                () => {
+                    const on = bindStore.getState().highlight
+                    bindStore.setState({ highlight: !on })
+                    highlighter.toggle(!on)
+                }
+            )
+            // 绑定开关
+            addToggleButton(btn.x, btn.y, 12, 12, -1,
+                () => bindStore.has(dim, key) ? '§a★' : '§c★',
+                () => `${bindStore.has(dim, key) ? '§c解绑' : '§a绑定'} §8(§7${key}§8)`,
+                () => bindStore.toggleBind(bpos)
+            )
         }
     })))
 
@@ -279,9 +272,7 @@ if (isEnabled()) {
             hasReward: blockEntity.hasOutputItem()
         } : null
     }
-    /** 对指定坐标执行一次抽奖/领奖/补金币
-     * @param {BlockPosHelper} pos
-     */
+    /** 对指定坐标执行一次抽奖/领奖/补金币 @param {BlockPosHelper} pos */
     const processMachine = (pos) => {
         let st = readSlots(pos)
         if (!st) return
@@ -296,7 +287,6 @@ if (isEnabled()) {
         // }
         let ply = Player.getPlayer().getBlockPos()
         let screen = Hud.getOpenScreen()
-        // if ((!screen || (screen && Reflection.getClassName(screen) == SlotMachine.screenType))) {
         if (!screen) {
             if (_dev && ServerLevel.level()) {
                 const ItemStackHelper = Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
@@ -315,23 +305,74 @@ if (isEnabled()) {
             }
         }
     }
-    // 收集本轮要处理的机器坐标（去重）
-    // 全部模式：周边扫描 + 绑定列表；仅绑定模式：绑定列表
+    // 收集本轮要处理的机器坐标（去重），全部模式：周边扫描 + 绑定列表；仅绑定模式：绑定列表
     const collectTargets = () => {
-        let dim = getDimension()
+        let dim = World.getDimension()
         let map = new Map()
         if (!bindOnly) {
             for (let pos of Array.from(scanner.scanAroundPlayer(12)))
-                map.set(posKey(pos), PositionCommon.createBlockPos(pos.x, pos.y, pos.z))
+                map.set(bindStore.posKey(pos), PositionCommon.createBlockPos(pos.x, pos.y, pos.z))
         }
         for (let b of bindStore.list(dim))
-            map.set(posKey(b), PositionCommon.createBlockPos(b.x, b.y, b.z))
+            map.set(bindStore.posKey(b), PositionCommon.createBlockPos(b.x, b.y, b.z))
         return Array.from(map.values())
     }
 
+    // ============ 高亮：绑定 + 周边目标，颜色反映状态 ============
+    const highlighter = {
+        /** @type {Draw3D} */
+        d3d: null,
+        enabled: false,
+        _tick: null,
+        _sig: '',
+        rebuild(force) {
+            if (!this.enabled || !this.d3d) return
+            const dim = World.getDimension()
+            const isRunning = bindStore.getState().running
+            const targets = collectTargets()
+            // 签名：状态 + 每个目标的坐标与绑定标记
+            const sig = `${isRunning}|${bindOnly}|` + targets.map(p =>
+                `${p.x},${p.y},${p.z}:${bindStore.has(dim, bindStore.posKey(p)) ? 1 : 0}`
+            ).join(';')
+            if (!force && sig === this._sig) return
+            this._sig = sig
+
+            this.d3d.clear()
+            for (const pos of targets) {
+                const color = bindStore.has(dim, bindStore.posKey(pos))
+                    ? (isRunning ? 0x00FF00 : 0xFFFF00)   // 绿 / 黄
+                    : (isRunning ? 0x00FFFF : 0xFF8800)   // 青 / 橙
+                this.d3d.boxBuilder()
+                    .forBlock(pos.getX() | 0, pos.getY() | 0, pos.getZ() | 0)
+                    .color(color).fill(false).cull(false)
+                    .buildAndAdd()
+            }
+        },
+        start() {
+            if (this.enabled) return
+            this.enabled = true
+            this.d3d ??= Hud.createDraw3D()
+            this.d3d.register()
+            this._sig = ''
+            this.rebuild(true)
+            this._tick = JsMacros.on('Tick', JavaWrapper.methodToJava(() => this.rebuild()))
+        },
+        stop() {
+            this.enabled = false
+            if (this._tick) { JsMacros.off(this._tick); this._tick = null }
+            if (this.d3d) { this.d3d.clear(); this.d3d.unregister() }
+            this._sig = ''
+        },
+        toggle(v) {
+            (v ?? !this.enabled) ? this.start() : this.stop()
+            return this.enabled
+        }
+    }
+    // 恢复上次的高亮状态
+    if (state.highlight) highlighter.start()
+
     _listener.on(() => {
-        if (!running) return
-        if (spinState) return
+        if (!running || spinState) return
         spinState = true
         for (let rawPos of collectTargets())
             processMachine(rawPos)
@@ -340,5 +381,6 @@ if (isEnabled()) {
     }).offHandle = () => {
         listenters.forEach(v => JsMacros.off(v))
         listenters = []
+        highlighter.stop()
     }
 }

@@ -208,10 +208,8 @@ if (isEnabled()) {
                 if (inv && inv.getSlot(36).getCount() == 0) {
                     for (let i of inv.findItem(SlotMachine.$coin)) {
                         if (inv.getSlot(i).getCount() <= 1) continue
-                        inv.click(i, 0)
-                        Client.waitTick()
-                        inv.click(i, 1)
-                        Client.waitTick()
+                        inv.click(i, 0), Client.waitTick()
+                        inv.click(i, 1), Client.waitTick()
                         inv.click(36, 0)
                         break
                     }
@@ -292,13 +290,14 @@ if (isEnabled()) {
             Client.waitTick()
             SlotMachine.send(false, pos.getRaw())
         }
-        if (st.hasReward) {
-            SlotMachine.claim(pos.getRaw())
-            Client.waitTick()
-        }
+        // if (st.hasReward) {
+        //     SlotMachine.claim(pos.getRaw())
+        //     Client.waitTick()
+        // }
         let ply = Player.getPlayer().getBlockPos()
         let screen = Hud.getOpenScreen()
-        if ((!screen || (screen && Reflection.getClassName(screen) == SlotMachine.screenType))) {
+        // if ((!screen || (screen && Reflection.getClassName(screen) == SlotMachine.screenType))) {
+        if (!screen) {
             if (_dev && ServerLevel.level()) {
                 const ItemStackHelper = Java.type('xyz.wagyourtail.jsmacros.client.api.helpers.inventory.ItemStackHelper')
                 let handler = Reflection.getReflect(st.blockEntity).get('itemHandler')
